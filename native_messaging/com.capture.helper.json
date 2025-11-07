@@ -1,0 +1,10 @@
+{
+  "name": "com.capture.helper",
+  "description": "Desktop Capture Helper Host",
+  "path": "C:\\Users\\Admin\\OneDrive\\Desktop\\Projects\\desktop-capture-app\\backend\\native_host.py",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://klhohdnggilcollbfiohahnndcmehbpl/"
+  ]
+}
+

@@ -1,0 +1,14 @@
+{
+  "name": "desktop-capture-electron",
+  "version": "0.1.0",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "electron": "29.4.0",
+    "node-fetch": "3.3.2"
+  }
+}
+

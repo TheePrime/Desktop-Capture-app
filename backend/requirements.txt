@@ -1,0 +1,13 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+mss==9.0.1
+pynput==1.7.7
+pyautogui==0.9.54
+pygetwindow==0.0.9
+psutil==6.0.0
+Pillow==10.4.0
+pywin32==311
+python-multipart==0.0.9
+pydantic==2.9.2
+pydantic-core==2.23.4
+

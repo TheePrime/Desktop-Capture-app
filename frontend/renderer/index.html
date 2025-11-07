@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Desktop Capture Controller</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 24px; }
+      .row { margin-bottom: 12px; }
+      button { margin-right: 8px; padding: 8px 14px; }
+      input { padding: 6px 10px; width: 100px; }
+      .card { border: 1px solid #ddd; padding: 16px; border-radius: 8px; }
+      .muted { color: #666; }
+      pre { background: #f8f8f8; padding: 12px; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <h2>Desktop Capture Controller</h2>
+    <div class="card">
+      <div class="row">
+        <button id="startBtn">Start</button>
+        <button id="stopBtn">Stop</button>
+      </div>
+      <div class="row">
+        <label>Capture rate (Hz): </label>
+        <input type="number" id="hzInput" step="0.1" min="0.1" value="1" />
+        <button id="setHzBtn">Apply</button>
+      </div>
+      <div class="row">
+        <button id="refreshBtn">Refresh Status</button>
+      </div>
+      <div class="row">
+        <div class="muted">Backend at http://127.0.0.1:8000</div>
+      </div>
+      <div class="row">
+        <pre id="statusPre">{}</pre>
+      </div>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+  </html>
+
+

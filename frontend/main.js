@@ -1,6 +1,18 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 
+// Use global fetch if available, otherwise try to fall back to node-fetch
+let fetchImpl = globalThis.fetch || undefined;
+if (!fetchImpl) {
+  try {
+    const nf = require('node-fetch');
+    fetchImpl = nf.default || nf;
+  } catch (e) {
+    // leave undefined; handlers will surface errors to the UI
+    fetchImpl = undefined;
+  }
+}
+
 const BACKEND = 'http://127.0.0.1:8000';
 
 async function createWindow() {
@@ -30,7 +42,8 @@ app.on('window-all-closed', () => {
 
 ipcMain.handle('backend:status', async () => {
   try {
-    const res = await fetch(`${BACKEND}/status`);
+    if (!fetchImpl) throw new Error('fetch not available in main process');
+    const res = await fetchImpl(`${BACKEND}/status`);
     return await res.json();
   } catch (e) {
     return { error: String(e) };
@@ -39,7 +52,8 @@ ipcMain.handle('backend:status', async () => {
 
 ipcMain.handle('backend:start', async () => {
   try {
-    const res = await fetch(`${BACKEND}/start`, { method: 'POST' });
+    if (!fetchImpl) throw new Error('fetch not available in main process');
+    const res = await fetchImpl(`${BACKEND}/start`, { method: 'POST' });
     return await res.json();
   } catch (e) {
     return { error: String(e) };
@@ -48,7 +62,8 @@ ipcMain.handle('backend:start', async () => {
 
 ipcMain.handle('backend:stop', async () => {
   try {
-    const res = await fetch(`${BACKEND}/stop`, { method: 'POST' });
+    if (!fetchImpl) throw new Error('fetch not available in main process');
+    const res = await fetchImpl(`${BACKEND}/stop`, { method: 'POST' });
     return await res.json();
   } catch (e) {
     return { error: String(e) };
@@ -57,7 +72,8 @@ ipcMain.handle('backend:stop', async () => {
 
 ipcMain.handle('backend:setHz', async (_evt, hz) => {
   try {
-    const res = await fetch(`${BACKEND}/config`, {
+    if (!fetchImpl) throw new Error('fetch not available in main process');
+    const res = await fetchImpl(`${BACKEND}/config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ hz }),

@@ -10,7 +10,7 @@ import mss
 import pyautogui
 from PIL import Image, ImageDraw
 
-from logger import day_folder, utc_iso_millis
+from logger import day_folder, utc_iso_millis, logger
 
 
 def _get_monitor_index_for_point(monitors: list[dict], x: int, y: int) -> int:
@@ -78,9 +78,15 @@ class ScreenCapture:
                     filename = utc_iso_millis() + ".png"
                     path = os.path.join(folder, filename)
                     img.save(path)
-                except Exception:
-                    # Best-effort capture loop; avoid crashing
-                    pass
+                except Exception as e:
+                    # Best-effort capture loop; avoid crashing but log the error so we can diagnose
+                    try:
+                        logger.exception(f"Error during screen capture: {e}")
+                    except Exception:
+                        # Last-resort: print the traceback
+                        import traceback
+
+                        traceback.print_exc()
                 time.sleep(interval)
 
 

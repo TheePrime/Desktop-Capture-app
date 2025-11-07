@@ -24,3 +24,5 @@ Thumbs.db
 
 # VSCode
 .vscode/
+
+data/*.png

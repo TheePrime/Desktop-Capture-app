@@ -4,15 +4,15 @@ import json
 import os
 import struct
 import sys
+from logger import ClickLogger
 
 
-LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
-CSV_PATH = os.path.join(LOG_DIR, "clicks.csv")
-NDJSON_PATH = os.path.join(LOG_DIR, "clicks.ndjson")
+OUTPUT_BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
+_CLICK_LOGGER = ClickLogger(OUTPUT_BASE)
 
 
 def ensure_log_dir() -> None:
-    os.makedirs(LOG_DIR, exist_ok=True)
+    os.makedirs(OUTPUT_BASE, exist_ok=True)
 
 
 def read_message():
@@ -34,20 +34,22 @@ def send_message(message):
 def write_log(data):
     ensure_log_dir()
     ts = datetime.datetime.utcnow().isoformat() + "Z"
-    data["ts"] = ts
-    data.setdefault("source", "ext")
-
-    with open(NDJSON_PATH, "a", encoding="utf-8") as ndjson_file:
-        ndjson_file.write(json.dumps(data, ensure_ascii=False) + "\n")
-
-    header = ["ts", "text", "browser_url", "source"]
-    write_header = not os.path.exists(CSV_PATH)
-    with open(CSV_PATH, "a", newline="", encoding="utf-8") as csv_file:
-        writer = csv.DictWriter(csv_file, fieldnames=header)
-        if write_header:
-            writer.writeheader()
-        row = {key: data.get(key, "") for key in header}
-        writer.writerow(row)
+    text = data.get("text")
+    url = data.get("browser_url") or data.get("url")
+    record = {
+        "timestamp_utc": ts,
+        "x": data.get("x"),
+        "y": data.get("y"),
+        "app_name": "chrome",
+        "process_id": None,
+        "window_title": data.get("title"),
+        "display_id": data.get("display_id"),
+        "source": data.get("source", "ext"),
+        "url_or_path": url,
+        "text": text,
+        "screenshot_path": None,
+    }
+    _CLICK_LOGGER.log_click(record)
 
 
 def main():

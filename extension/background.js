@@ -1,6 +1,40 @@
 const BACKEND = 'http://127.0.0.1:8000';
 const HOST_NAME = 'com.capture.helper';
 
+let nativePort = null;
+let reconnecting = false
+
+
+function connectNativeHost() {
+  if (reconnecting) return;
+  reconnecting = true;
+  try {
+    nativePort = chrome.runtime.connectNative(HOST_NAME);
+    console.log('[NativeHost] Connected to native host');
+    nativePort.onMessage.addListener((msg) => {
+      console.log('[NativeHost] Received from Python:', msg);
+    });
+    nativePort.onDisconnect.addListener(() => {
+      console.log('[NativeHost] Disconnected from native host');
+      nativePort = null;
+      setTimeout(
+        connectNativeHost,2000); // auto-retry
+    });
+  } catch (err) {
+    console.error('[NativeHost] Connection error:', err);
+    nativePort = null;
+    setTimeout(connectNativeHost, 3000);
+  }
+}
+
+
+// Always reconnect when the service worker wakes up
+chrome.runtime.onStartup.addListener(connectNativeHost);
+chrome.runtime.onSuspendCanceled.addListener(connectNativeHost);
+
+// Try to connect immediately
+connectNativeHost();
+
 async function sendToBackend(payload) {
   try {
     console.log('[Capture] Sending to backend:', payload);
@@ -26,22 +60,39 @@ async function sendToBackend(payload) {
 function sendToNativeHost(payload) {
   return new Promise((resolve) => {
     try {
-      chrome.runtime.sendNativeMessage(HOST_NAME, payload, (response) => {
-        if (chrome.runtime.lastError) {
-          console.warn('[Capture] Native messaging error:', chrome.runtime.lastError.message);
-          resolve({ ok: false, error: chrome.runtime.lastError.message });
-          return;
-        }
-        console.log('[Capture] Native messaging response:', response);
-        resolve({ ok: true, response });
-      });
+      if (!nativePort) {
+        console.warn('[Capture] No native port, reconnecting...');
+        connectNativeHost();
+      }
+      if (!nativePort) {
+        resolve({ ok: false, error: 'no native port' });
+        return;
+      }
+      const onMessage = (msg) => {
+        console.log('[Capture] Native response:', msg);
+        cleanup();
+        resolve({ ok: true, response: msg });
+      };
+      const onDisconnect = () => {
+        console.warn('[Capture] Native port disconnected during send');
+        cleanup();
+        resolve({ ok: false, error: 'native disconnect' });
+      };
+      function cleanup() {
+        try { nativePort.onMessage.removeListener(onMessage); } catch {}
+        try { nativePort.onDisconnect.removeListener(onDisconnect); } catch {}
+      }
+      nativePort.onMessage.addListener(onMessage);
+      nativePort.onDisconnect.addListener(onDisconnect);
+      nativePort.postMessage(payload);
     } catch (err) {
-      console.warn('[Capture] Failed to send native message:', err);
+      console.warn('[Capture] Failed to post to native port:', err);
       resolve({ ok: false, error: String(err) });
     }
   });
 }
 
+// Receive one-off messages
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message && message.type === 'POST_CONTENT') {
     console.log('[Capture] Received POST_CONTENT message:', message);
@@ -91,6 +142,52 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Return false since we already sent the response
     return false;
   }
+});
+
+// Receive messages from persistent content ports
+chrome.runtime.onConnect.addListener((port) => {
+  console.log('[NativeHost] Chrome Port connected:', port.name);
+  if (port.name !== 'capture') {
+    return;
+  }
+  port.onMessage.addListener((message) => {
+    if (!message || message.type !== 'POST_CONTENT') return;
+    const payload = {
+      text: message.text,
+      url: message.url,
+      title: message.title,
+      x: message.x,
+      y: message.y,
+      tabId: message.tabId,
+    };
+    const nativePayload = {
+      text: payload.text,
+      browser_url: payload.url,
+      title: payload.title,
+      x: payload.x,
+      y: payload.y,
+      tabId: payload.tabId,
+    };
+    sendToNativeHost(nativePayload)
+      .then((nativeResult) => {
+        if (!nativeResult.ok) {
+          console.log('[Capture] Falling back to HTTP (port):', nativeResult.error);
+          return sendToBackend(payload);
+        }
+        return nativeResult;
+      })
+      .then((result) => {
+        if (!result) return;
+        if (result.error) {
+          console.error('[Capture] Backend returned error (port):', result.error);
+        } else {
+          console.log('[Capture] Successfully processed payload (port)');
+        }
+      })
+      .catch((e) => {
+        console.error('[Capture] Processing payload via port failed:', e);
+      });
+  });
 });
 
 

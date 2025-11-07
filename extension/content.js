@@ -1,5 +1,32 @@
 console.log('[Capture] Content script loaded on:', window.location.href);
 
+let capturePort = null;
+
+function connectPort() {
+  try {
+    capturePort = chrome.runtime.connect({ name: 'capture' });
+    console.log('[Capture] Persistent port opened');
+
+    capturePort.onDisconnect.addListener(() => {
+      console.warn('[Capture] Port disconnected, retrying in 1.5s...');
+      capturePort = null;
+      setTimeout(connectPort, 1500);
+    });
+  } catch (e) {
+    console.warn('[Capture] Failed to open persistent port:', e);
+    setTimeout(connectPort, 2000);
+  }
+}
+
+connectPort();
+
+// In case LinkedIn dynamically replaces the DOM (SPA navigation)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && !capturePort) {
+    connectPort();
+  }
+});
+
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function expandSeeMore(root) {
@@ -75,16 +102,36 @@ async function handleClick(ev) {
     };
     console.log('[Capture] Sending click event:', payload);
     
-    chrome.runtime.sendMessage(payload, (response) => {
-      if (chrome.runtime.lastError) {
-        console.error('[Capture] Error sending message:', chrome.runtime.lastError);
-      } else {
-        console.log('[Capture] Message response:', response);
-        if (response && !response.ok) {
-          console.error('[Capture] Backend error:', response.error);
-        }
+    let sent = false;
+    // First try persistent port
+    try {
+      if (capturePort) {
+        capturePort.postMessage(payload);
+        sent = true;
       }
-    });
+    } catch (e) {
+      console.warn('[Capture] Port postMessage failed:', e);
+    }
+    // Fallback to one-off message
+    if (!sent) {
+      try {
+        chrome.runtime.sendMessage(payload, (response) => {
+          if (chrome.runtime.lastError) {
+            console.error('[Capture] Error sending message:', chrome.runtime.lastError);
+            return;
+          }
+          console.log('[Capture] Message response:', response);
+          if (response && !response.ok) {
+            console.error('[Capture] Backend error:', response.error);
+          }
+        });
+        sent = true;
+      } catch (err) {
+        // Handles synchronous errors like "Extension context invalidated"
+        console.error('[Capture] sendMessage threw synchronously:', err);
+      }
+    }
+  
   } catch (e) {
     console.error('[Capture] Error in handleClick:', e);
   }

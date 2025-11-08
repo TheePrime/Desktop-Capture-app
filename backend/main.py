@@ -29,6 +29,11 @@ class AppState:
     def __init__(self) -> None:
         self.config = CaptureConfig(hz=1.0, output_base=os.path.abspath(OUTPUT_BASE))
         self.capture = ScreenCapture(self.config)
+        # Hook capture callback so we can attach screenshots to pending clicks
+        try:
+            self.capture.on_capture = self._on_screenshot
+        except Exception:
+            pass
         self.logger = ClickLogger(self.config.output_base)
         self.listener = GlobalClickListener(ListenerConfig(on_click=self._on_click))
 
@@ -39,6 +44,63 @@ class AppState:
         # Matching parameters
         self._merge_timeout = 0.250  # seconds
         self._merge_distance_px = 80  # pixels tolerance when matching ext payload to click
+        # When a screenshot is saved, attach it to any pending click within
+        # this time window (seconds) and pixel distance.
+        # Choose attach timeout relative to capture frequency so we don't miss
+        # captures when the capture loop runs at ~1Hz by default.
+        try:
+            self._screenshot_attach_timeout = max(0.75, 1.0 / max(0.1, self.config.hz) + 0.5)
+        except Exception:
+            self._screenshot_attach_timeout = 1.5
+        self._screenshot_attach_distance = 120
+
+    def _on_screenshot(self, path: str, cursor_x: int, cursor_y: int, monitor_index: int) -> None:
+        """Called by ScreenCapture when a screenshot is saved.
+
+        Try to find a pending click close in time and distance and attach the
+        screenshot path, then flush that pending record immediately.
+        """
+        try:
+            now = time.time()
+            candidate = None
+            candidate_dist = None
+            candidate_id = None
+            with self._pending_lock:
+                for cid, entry in list(self._pending.items()):
+                    rec = entry.get("record", {})
+                    rx = rec.get("x")
+                    ry = rec.get("y")
+                    if rx is None or ry is None:
+                        continue
+                    # Only consider recent pending entries
+                    if now - entry.get("created_at", 0) > self._screenshot_attach_timeout:
+                        continue
+                    dist = ((rx - cursor_x) ** 2 + (ry - cursor_y) ** 2) ** 0.5
+                    if dist <= self._screenshot_attach_distance and (candidate is None or dist < candidate_dist):
+                        candidate = entry
+                        candidate_dist = dist
+                        candidate_id = cid
+                if candidate_id:
+                    entry = self._pending.pop(candidate_id, None)
+                else:
+                    entry = None
+
+            if not entry:
+                return
+
+            # Cancel the flush timer and attach screenshot
+            try:
+                entry["timer"].cancel()
+            except Exception:
+                pass
+            rec = entry.get("record", {})
+            rec["screenshot_path"] = path
+            try:
+                self.logger.log_click(rec)
+            except Exception:
+                logger.exception("Failed to log click with attached screenshot")
+        except Exception:
+            logger.exception("Error in _on_screenshot")
 
     def _on_click(self, record: dict) -> None:
         # When an OS click occurs, we hold writing for up to ~250ms to allow

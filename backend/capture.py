@@ -80,6 +80,9 @@ class ScreenCapture:
         self._cursor_radius = 8
         self._cursor_color = (255, 0, 0)
         self._cursor_outline_width = 3
+        # Optional callback: called after a screenshot is saved.
+        # Signature: on_capture(path: str, cursor_x: int, cursor_y: int, monitor_index: int)
+        self.on_capture = None
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -137,6 +140,16 @@ class ScreenCapture:
                             img.save(path)
                             saved = True
                             logger.info(f"Saved screenshot: {path}")
+                            # Notify callback if present (don't block or raise)
+                            try:
+                                cb = getattr(self, "on_capture", None)
+                                if callable(cb):
+                                    try:
+                                        cb(path, cursor_x, cursor_y, mon_idx)
+                                    except Exception:
+                                        logger.exception("on_capture callback raised")
+                            except Exception:
+                                pass
                             break
                         except Exception as e:
                             last_exc = e
@@ -188,6 +201,15 @@ class ScreenCapture:
                 path = os.path.join(folder, filename)
                 img.save(path)
                 logger.info(f"capture_once: saved {path}")
+                try:
+                    cb = getattr(self, "on_capture", None)
+                    if callable(cb):
+                        try:
+                            cb(path, cursor_x, cursor_y, mon_idx)
+                        except Exception:
+                            logger.exception("on_capture callback raised in capture_once")
+                except Exception:
+                    pass
                 return path
         except Exception as e:
             try:

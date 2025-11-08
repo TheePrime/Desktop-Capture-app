@@ -5,6 +5,7 @@ import logging
 import os
 import struct
 import sys
+from urllib.parse import urlparse, unquote
 from logger import ClickLogger
 
 
@@ -57,9 +58,27 @@ def write_log(data):
         "display_id": data.get("display_id"),
         "source": data.get("source", "ext"),
         "url_or_path": url,
+        # Optionally include doc_path when extension sends a file:// URL
+        # (parsed below)
+        # "doc_path": None,
         "text": text,
         "screenshot_path": None,
     }
+    # If the extension supplied a file:// URL (Chrome PDF viewer), record the
+    # local document path in `doc_path` and normalize `url_or_path` to that path.
+    try:
+        if url and isinstance(url, str) and url.startswith("file://"):
+            parsed = urlparse(url)
+            path = unquote(parsed.path or "")
+            # On Windows the path may start with a leading slash ("/C:/...")
+            if os.name == "nt" and path.startswith("/") and len(path) > 2 and path[2] == ":":
+                path = path.lstrip("/")
+            record["doc_path"] = path
+            record["url_or_path"] = path
+            # Keep app_name as chrome (embedded PDF viewer) for now
+    except Exception:
+        # Don't let parsing errors break the native host
+        pass
     _CLICK_LOGGER.log_click(record)
     try:
         # Log to native_host.log for diagnostics (do not write to stdout/stderr)

@@ -149,7 +149,21 @@ def ext_event(payload: dict = Body(...)) -> dict:
             rec = matched_entry.get("record", {})
             # Merge extension payload fields
             rec["text"] = payload.get("text") or rec.get("text")
-            rec["url_or_path"] = payload.get("url") or rec.get("url_or_path")
+            # Handle file:// URLs specially (PDFs)
+            url_val = payload.get("url")
+            if isinstance(url_val, str) and url_val.startswith("file://"):
+                try:
+                    from urllib.parse import urlparse, unquote
+                    parsed = urlparse(url_val)
+                    path = unquote(parsed.path or "")
+                    if os.name == "nt" and path.startswith("/") and len(path) > 2 and path[2] == ":":
+                        path = path.lstrip("/")
+                    rec["doc_path"] = path
+                    rec["url_or_path"] = path
+                except Exception:
+                    rec["url_or_path"] = url_val or rec.get("url_or_path")
+            else:
+                rec["url_or_path"] = url_val or rec.get("url_or_path")
             rec["window_title"] = payload.get("title") or rec.get("window_title")
             rec["display_id"] = payload.get("display_id") or rec.get("display_id")
             rec["source"] = "ext"
@@ -159,11 +173,13 @@ def ext_event(payload: dict = Body(...)) -> dict:
             return {"ok": False, "error": "merge_failed"}
 
     # No matching OS click — write ext-only record. If extension provided global coords,
-    # use them to compute display_id and store global x/y.
+    # use them to compute display_id and store global x/y. Also handle file:// URLs
+    # (Chrome PDF viewer) by extracting a local doc_path.
+    url_val = payload.get("url")
     record = {
         "source": "ext",
         "text": payload.get("text"),
-        "url_or_path": payload.get("url"),
+        "url_or_path": url_val,
         "x": payload.get("x"),
         "y": payload.get("y"),
         "app_name": "chrome",
@@ -171,6 +187,20 @@ def ext_event(payload: dict = Body(...)) -> dict:
         "window_title": payload.get("title"),
         "display_id": payload.get("display_id"),
     }
+
+    # Treat file:// URLs as document paths (PDFs). Normalize and store as doc_path
+    try:
+        if isinstance(url_val, str) and url_val.startswith("file://"):
+            from urllib.parse import urlparse, unquote
+            parsed = urlparse(url_val)
+            path = unquote(parsed.path or "")
+            if os.name == "nt" and path.startswith("/") and len(path) > 2 and path[2] == ":":
+                path = path.lstrip("/")
+            record["doc_path"] = path
+            record["url_or_path"] = path
+            # keep app_name as chrome (embedded PDF viewer) for now
+    except Exception:
+        pass
 
     gx = payload.get("global_x")
     gy = payload.get("global_y")

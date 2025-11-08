@@ -45,6 +45,10 @@ class ScreenCapture:
         os.makedirs(self.config.output_base, exist_ok=True)
         self._thread: Optional[Thread] = None
         self._stop_event = Event()
+        # cursor overlay settings (adjustable)
+        self._cursor_radius = 8
+        self._cursor_color = (255, 0, 0)
+        self._cursor_outline_width = 3
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -77,7 +81,21 @@ class ScreenCapture:
                     folder = day_folder(self.config.output_base)
                     filename = utc_iso_millis() + ".png"
                     path = os.path.join(folder, filename)
-                    img.save(path)
+                    # Attempt to save with a small retry in case of transient IO errors
+                    saved = False
+                    last_exc = None
+                    for attempt in range(2):
+                        try:
+                            img.save(path)
+                            saved = True
+                            logger.info(f"Saved screenshot: {path}")
+                            break
+                        except Exception as e:
+                            last_exc = e
+                            logger.warning(f"Failed to save screenshot (attempt {attempt+1}): {e}")
+                            time.sleep(0.05)
+                    if not saved:
+                        logger.error(f"Could not save screenshot after retries: {path} -- {last_exc}")
                 except Exception as e:
                     # Best-effort capture loop; avoid crashing but log the error so we can diagnose
                     try:
@@ -88,5 +106,29 @@ class ScreenCapture:
 
                         traceback.print_exc()
                 time.sleep(interval)
+
+    def capture_once(self) -> Optional[str]:
+        """Capture a single screenshot immediately and return the path or None on failure."""
+        try:
+            with mss.mss() as sct:
+                cursor_x, cursor_y = pyautogui.position()
+                monitors = sct.monitors
+                mon_idx = _get_monitor_index_for_point(monitors, cursor_x, cursor_y)
+                mon = monitors[mon_idx]
+                raw = sct.grab(mon)
+                img = Image.frombytes("RGB", raw.size, raw.rgb)
+                _draw_cursor(img, (cursor_x, cursor_y), mon)
+                folder = day_folder(self.config.output_base)
+                filename = utc_iso_millis() + ".png"
+                path = os.path.join(folder, filename)
+                img.save(path)
+                logger.info(f"capture_once: saved {path}")
+                return path
+        except Exception as e:
+            try:
+                logger.exception(f"capture_once failed: {e}")
+            except Exception:
+                pass
+        return None
 
 

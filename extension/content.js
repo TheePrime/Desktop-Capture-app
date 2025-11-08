@@ -89,48 +89,30 @@ async function handleClick(ev) {
     };
     console.log('[Capture] Sending click event:', payload);
     
-    // Use one-off sendMessage (reliable for MV3 service workers) if possible
-    let sent = false;
-    if (canUseChromeRuntime()) {
-      try {
+    // Always send to the extension background which will handle native host or
+    // HTTP fallback. Avoid doing page-origin fetches (these trigger PNA/CORS
+    // errors on HTTPS sites like LinkedIn). The background has host_permissions
+    // for the local backend and will perform the HTTP POST when native fails.
+    try {
+      if (canUseChromeRuntime()) {
         chrome.runtime.sendMessage(payload, (response) => {
           if (chrome.runtime.lastError) {
-            console.error('[Capture] Error sending message:', chrome.runtime.lastError);
+            console.error('[Capture] Error sending message to background:', chrome.runtime.lastError);
             return;
           }
-          console.log('[Capture] Message response:', response);
+          console.log('[Capture] Message response from background:', response);
           if (response && !response.ok) {
-            console.error('[Capture] Backend error:', response.error);
+            console.error('[Capture] Background reported error:', response.error);
           }
         });
-        sent = true;
-      } catch (err) {
-        console.error('[Capture] sendMessage threw synchronously:', err);
+      } else {
+        // If runtime isn't available (very unusual for extension content scripts),
+        // we avoid doing a direct fetch to the page origin because that can be
+        // blocked by PNA/CORS on some sites. Log and skip.
+        console.warn('[Capture] chrome.runtime not available in content script; skipping HTTP fallback to avoid PNA/CORS issues');
       }
-    }
-
-    // If messaging isn't available or failed, fall back to HTTP POST to backend
-    if (!sent) {
-      try {
-        // Include global coordinates and devicePixelRatio in HTTP fallback
-        fetch(`${BACKEND}/ext_event`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            text: payload.text,
-            url: payload.url,
-            title: payload.title,
-            x: payload.x,
-            y: payload.y,
-            global_x: payload.global_x,
-            global_y: payload.global_y,
-            devicePixelRatio: payload.devicePixelRatio,
-          })
-        }).then(res => res.json()).then(r => console.log('[Capture] Backend HTTP fallback response:', r)).catch(e => console.error('[Capture] Backend HTTP fallback failed:', e));
-        sent = true;
-      } catch (e) {
-        console.error('[Capture] HTTP fallback threw:', e);
-      }
+    } catch (err) {
+      console.error('[Capture] sendMessage threw synchronously:', err);
     }
   
   } catch (e) {

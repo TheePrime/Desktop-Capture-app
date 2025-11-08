@@ -79,6 +79,85 @@ def write_log(data):
     except Exception:
         # Don't let parsing errors break the native host
         pass
+
+    # If extension provided global coordinates, try to map to a display id.
+    # Heuristic: try the raw coords first; if no monitor matches and the
+    # extension provided a devicePixelRatio, also try scaled variants (gx * dpr)
+    # and (gx / dpr) to handle cases where the extension reported CSS pixels
+    # rather than physical pixels. Log monitors and attempts to native_host.log
+    try:
+        gx = data.get("global_x")
+        gy = data.get("global_y")
+        dpr = data.get("devicePixelRatio") or data.get("dpr") or 1
+        if gx is not None and gy is not None:
+            try:
+                import mss
+                with mss.mss() as sct:
+                    monitors = sct.monitors
+                    # Diagnostic: log monitor rectangles and incoming coords
+                    try:
+                        logger.info(f"Mapping global coords gx={gx}, gy={gy}, dpr={dpr}")
+                        logger.info(f"Monitors: {[{k:mon[k] for k in ('left','top','width','height')} for mon in monitors]}")
+                    except Exception:
+                        pass
+
+                    def try_map(px, py):
+                        for idx in range(1, len(monitors)):
+                            mon = monitors[idx]
+                            if mon["left"] <= px < mon["left"] + mon["width"] and mon["top"] <= py < mon["top"] + mon["height"]:
+                                return idx
+                        return None
+
+                    mapped = None
+                    used_coords = (gx, gy)
+
+                    # Attempt 1: raw coords
+                    mapped = try_map(gx, gy)
+
+                    # Attempt 2: scale up (assume extension gave CSS pixels)
+                    if mapped is None and dpr and dpr != 1:
+                        try:
+                            sgx = int(round(float(gx) * float(dpr)))
+                            sgy = int(round(float(gy) * float(dpr)))
+                            mapped = try_map(sgx, sgy)
+                            if mapped is not None:
+                                used_coords = (sgx, sgy)
+                        except Exception:
+                            pass
+
+                    # Attempt 3: scale down (extension may have sent physical pixels)
+                    if mapped is None and dpr and dpr != 1:
+                        try:
+                            dgx = int(round(float(gx) / float(dpr)))
+                            dgy = int(round(float(gy) / float(dpr)))
+                            mapped = try_map(dgx, dgy)
+                            if mapped is not None:
+                                used_coords = (dgx, dgy)
+                        except Exception:
+                            pass
+
+                    if mapped is not None:
+                        record["display_id"] = mapped
+                        try:
+                            record["x"] = int(used_coords[0])
+                            record["y"] = int(used_coords[1])
+                        except Exception:
+                            pass
+                        try:
+                            logger.info(f"Mapped display_id={mapped} using coords={used_coords}")
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            logger.info("No monitor matched incoming global coords (raw or scaled)")
+                        except Exception:
+                            pass
+            except Exception:
+                logger.exception("mss mapping failed in native host")
+    except Exception:
+        # ignore any mapping/parsing errors but don't crash the host
+        logger.exception("Error while attempting to map global coords in native host")
+
     _CLICK_LOGGER.log_click(record)
     try:
         # Log to native_host.log for diagnostics (do not write to stdout/stderr)

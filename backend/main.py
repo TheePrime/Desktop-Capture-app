@@ -16,6 +16,10 @@ import time
 import uuid
 from typing import Dict
 import mss
+import logging
+LOG_PATH = os.path.join(os.path.dirname(__file__), 'backend_ext.log')
+logging.basicConfig(filename=LOG_PATH, level=logging.INFO, format='%(asctime)s [backend] %(levelname)s: %(message)s')
+logger = logging.getLogger('backend_main')
 
 
 OUTPUT_BASE = os.path.join(os.path.dirname(__file__), "..", "data")
@@ -205,28 +209,73 @@ def ext_event(payload: dict = Body(...)) -> dict:
 
     gx = payload.get("global_x")
     gy = payload.get("global_y")
+    dpr = payload.get("devicePixelRatio") or payload.get("dpr") or 1
     try:
         if gx is not None and gy is not None:
-            # Try to find monitor via mss
             try:
                 with mss.mss() as sct:
                     monitors = sct.monitors
-                    for idx in range(1, len(monitors)):
-                        mon = monitors[idx]
-                        if mon["left"] <= gx < mon["left"] + mon["width"] and mon["top"] <= gy < mon["top"] + mon["height"]:
-                            record["display_id"] = idx
-                            break
+                    try:
+                        logger.info(f"ext_event mapping gx={gx}, gy={gy}, dpr={dpr}")
+                        logger.info(f"Monitors: {[{k:mon[k] for k in ('left','top','width','height')} for mon in monitors]}")
+                    except Exception:
+                        pass
+
+                    def try_map(px, py):
+                        for idx in range(1, len(monitors)):
+                            mon = monitors[idx]
+                            if mon["left"] <= px < mon["left"] + mon["width"] and mon["top"] <= py < mon["top"] + mon["height"]:
+                                return idx
+                        return None
+
+                    mapped = None
+                    used_coords = (gx, gy)
+
+                    # raw
+                    mapped = try_map(gx, gy)
+
+                    # scaled up (assume extension sent CSS pixels)
+                    if mapped is None and dpr and dpr != 1:
+                        try:
+                            sgx = int(round(float(gx) * float(dpr)))
+                            sgy = int(round(float(gy) * float(dpr)))
+                            mapped = try_map(sgx, sgy)
+                            if mapped is not None:
+                                used_coords = (sgx, sgy)
+                        except Exception:
+                            pass
+
+                    # scaled down
+                    if mapped is None and dpr and dpr != 1:
+                        try:
+                            dgx = int(round(float(gx) / float(dpr)))
+                            dgy = int(round(float(gy) / float(dpr)))
+                            mapped = try_map(dgx, dgy)
+                            if mapped is not None:
+                                used_coords = (dgx, dgy)
+                        except Exception:
+                            pass
+
+                    if mapped is not None:
+                        record["display_id"] = mapped
+                        try:
+                            record["x"] = int(used_coords[0])
+                            record["y"] = int(used_coords[1])
+                        except Exception:
+                            pass
+                        try:
+                            logger.info(f"Mapped display_id={mapped} using coords={used_coords}")
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            logger.info("No monitor matched incoming global coords (raw or scaled)")
+                        except Exception:
+                            pass
             except Exception:
-                # ignore mss failures
-                pass
-            # store global coords as authoritative x/y
-            try:
-                record["x"] = int(gx)
-                record["y"] = int(gy)
-            except Exception:
-                pass
+                logger.exception("mss mapping failed in backend ext_event")
     except Exception:
-        pass
+        logger.exception("Error while attempting to map global coords in backend ext_event")
 
     # Attempt to resolve process_id/app_name for ext-only events by scanning
     # window titles / processes if possible (best-effort).

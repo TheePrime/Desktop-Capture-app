@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from capture import ScreenCapture, CaptureConfig
 from listener import GlobalClickListener, ListenerConfig
+from listener import find_pid_for_window_title
 from logger import ClickLogger
 import threading
 import time
@@ -224,6 +225,22 @@ def ext_event(payload: dict = Body(...)) -> dict:
                 record["y"] = int(gy)
             except Exception:
                 pass
+    except Exception:
+        pass
+
+    # Attempt to resolve process_id/app_name for ext-only events by scanning
+    # window titles / processes if possible (best-effort).
+    try:
+        if not record.get("process_id"):
+            title = payload.get("title") or payload.get("url")
+            if title:
+                try:
+                    app_name_guess, pid_guess = find_pid_for_window_title(title)
+                    if pid_guess:
+                        record["process_id"] = pid_guess
+                        record["app_name"] = app_name_guess or record.get("app_name")
+                except Exception:
+                    pass
     except Exception:
         pass
 

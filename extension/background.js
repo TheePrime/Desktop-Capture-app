@@ -102,6 +102,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       title: message.title,
       x: message.x,
       y: message.y,
+      global_x: message.global_x,
+      global_y: message.global_y,
+      devicePixelRatio: message.devicePixelRatio,
       tabId: sender?.tab?.id,
     };
     
@@ -114,6 +117,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       title: payload.title,
       x: payload.x,
       y: payload.y,
+      global_x: payload.global_x,
+      global_y: payload.global_y,
+      devicePixelRatio: payload.devicePixelRatio,
       tabId: payload.tabId,
     };
 
@@ -158,6 +164,9 @@ chrome.runtime.onConnect.addListener((port) => {
       title: message.title,
       x: message.x,
       y: message.y,
+      global_x: message.global_x,
+      global_y: message.global_y,
+      devicePixelRatio: message.devicePixelRatio,
       tabId: message.tabId,
     };
     const nativePayload = {
@@ -166,6 +175,9 @@ chrome.runtime.onConnect.addListener((port) => {
       title: payload.title,
       x: payload.x,
       y: payload.y,
+      global_x: payload.global_x,
+      global_y: payload.global_y,
+      devicePixelRatio: payload.devicePixelRatio,
       tabId: payload.tabId,
     };
     sendToNativeHost(nativePayload)

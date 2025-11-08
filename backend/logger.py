@@ -55,6 +55,7 @@ class ClickLogger:
                     "display_id",
                     "source",
                     "url_or_path",
+                    "doc_path",
                     "text",
                     "screenshot_path",
                 ])
@@ -106,6 +107,7 @@ class ClickLogger:
                             record.get("display_id"),
                             record.get("source"),
                             record.get("url_or_path"),
+                            record.get("doc_path"),
                             (record.get("text") or "").replace("\n", " ").strip(),
                             record.get("screenshot_path"),
                         ])

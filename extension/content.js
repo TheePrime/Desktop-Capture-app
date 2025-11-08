@@ -112,10 +112,20 @@ async function handleClick(ev) {
     // If messaging isn't available or failed, fall back to HTTP POST to backend
     if (!sent) {
       try {
+        // Include global coordinates and devicePixelRatio in HTTP fallback
         fetch(`${BACKEND}/ext_event`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: payload.text, url: payload.url, title: payload.title, x: payload.x, y: payload.y })
+          body: JSON.stringify({
+            text: payload.text,
+            url: payload.url,
+            title: payload.title,
+            x: payload.x,
+            y: payload.y,
+            global_x: payload.global_x,
+            global_y: payload.global_y,
+            devicePixelRatio: payload.devicePixelRatio,
+          })
         }).then(res => res.json()).then(r => console.log('[Capture] Backend HTTP fallback response:', r)).catch(e => console.error('[Capture] Backend HTTP fallback failed:', e));
         sent = true;
       } catch (e) {
@@ -129,5 +139,35 @@ async function handleClick(ev) {
 }
 
 window.addEventListener('click', handleClick, { capture: true });
+
+// Some embedded viewers (PDF embed/object) don't always dispatch synthetic
+// click events to the page JS. Add lower-level listeners and try to attach
+// to embed/object elements so we catch clicks inside Chrome's PDF viewer.
+function _install_extra_listeners() {
+  try {
+    window.addEventListener('pointerdown', handleClick, { capture: true });
+    window.addEventListener('mousedown', handleClick, { capture: true });
+    window.addEventListener('mouseup', handleClick, { capture: true });
+
+    // Attach to any embed/object elements if present
+    const els = Array.from(document.querySelectorAll('embed, object'));
+    for (const el of els) {
+      try {
+        el.addEventListener('pointerdown', handleClick, { capture: true });
+        el.addEventListener('mousedown', handleClick, { capture: true });
+        el.addEventListener('mouseup', handleClick, { capture: true });
+      } catch (err) {
+        // Some embeds don't allow attaching listeners; ignore.
+      }
+    }
+  } catch (e) {
+    console.warn('[Capture] Failed to install extra listeners:', e);
+  }
+}
+
+// Install immediately and also attempt again after a short delay in case the
+// PDF embed is added after the content script runs.
+_install_extra_listeners();
+setTimeout(_install_extra_listeners, 500);
 
 

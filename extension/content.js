@@ -1,31 +1,14 @@
 console.log('[Capture] Content script loaded on:', window.location.href);
 
-let capturePort = null;
+const BACKEND = 'http://127.0.0.1:8000';
 
-function connectPort() {
+function canUseChromeRuntime() {
   try {
-    capturePort = chrome.runtime.connect({ name: 'capture' });
-    console.log('[Capture] Persistent port opened');
-
-    capturePort.onDisconnect.addListener(() => {
-      console.warn('[Capture] Port disconnected, retrying in 1.5s...');
-      capturePort = null;
-      setTimeout(connectPort, 1500);
-    });
+    return typeof chrome !== 'undefined' && chrome && chrome.runtime && typeof chrome.runtime.sendMessage === 'function';
   } catch (e) {
-    console.warn('[Capture] Failed to open persistent port:', e);
-    setTimeout(connectPort, 2000);
+    return false;
   }
 }
-
-connectPort();
-
-// In case LinkedIn dynamically replaces the DOM (SPA navigation)
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && !capturePort) {
-    connectPort();
-  }
-});
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -102,18 +85,9 @@ async function handleClick(ev) {
     };
     console.log('[Capture] Sending click event:', payload);
     
+    // Use one-off sendMessage (reliable for MV3 service workers) if possible
     let sent = false;
-    // First try persistent port
-    try {
-      if (capturePort) {
-        capturePort.postMessage(payload);
-        sent = true;
-      }
-    } catch (e) {
-      console.warn('[Capture] Port postMessage failed:', e);
-    }
-    // Fallback to one-off message
-    if (!sent) {
+    if (canUseChromeRuntime()) {
       try {
         chrome.runtime.sendMessage(payload, (response) => {
           if (chrome.runtime.lastError) {
@@ -127,8 +101,21 @@ async function handleClick(ev) {
         });
         sent = true;
       } catch (err) {
-        // Handles synchronous errors like "Extension context invalidated"
         console.error('[Capture] sendMessage threw synchronously:', err);
+      }
+    }
+
+    // If messaging isn't available or failed, fall back to HTTP POST to backend
+    if (!sent) {
+      try {
+        fetch(`${BACKEND}/ext_event`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: payload.text, url: payload.url, title: payload.title, x: payload.x, y: payload.y })
+        }).then(res => res.json()).then(r => console.log('[Capture] Backend HTTP fallback response:', r)).catch(e => console.error('[Capture] Backend HTTP fallback failed:', e));
+        sent = true;
+      } catch (e) {
+        console.error('[Capture] HTTP fallback threw:', e);
       }
     }
   

@@ -1,6 +1,7 @@
 import csv
 import datetime
 import json
+import logging
 import os
 import struct
 import sys
@@ -9,6 +10,16 @@ from logger import ClickLogger
 
 OUTPUT_BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
 _CLICK_LOGGER = ClickLogger(OUTPUT_BASE)
+
+# Configure a small file logger for the native host process. We avoid printing to stdout
+# because stdout is used for the native messaging framing protocol.
+LOG_PATH = os.path.join(os.path.dirname(__file__), 'native_host.log')
+logging.basicConfig(
+    filename=LOG_PATH,
+    level=logging.INFO,
+    format='%(asctime)s [native_host] %(levelname)s: %(message)s',
+)
+logger = logging.getLogger('native_host')
 
 
 def ensure_log_dir() -> None:
@@ -50,6 +61,11 @@ def write_log(data):
         "screenshot_path": None,
     }
     _CLICK_LOGGER.log_click(record)
+    try:
+        # Log to native_host.log for diagnostics (do not write to stdout/stderr)
+        logger.info(f"Wrote click record to NDJSON: { _CLICK_LOGGER.ndjson_path }")
+    except Exception:
+        pass
 
 
 def main():

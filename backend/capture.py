@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
+import platform
 from dataclasses import dataclass
 from threading import Event, Thread
 from typing import Optional
@@ -11,6 +13,28 @@ import pyautogui
 from PIL import Image, ImageDraw
 
 from logger import day_folder, utc_iso_millis, logger
+
+# On Windows, try to make the process DPI-aware so pyautogui returns
+# physical pixel coordinates that match mss captures. This is best-effort
+# and won't raise if the APIs are not available.
+if platform.system() == "Windows":
+    try:
+        import ctypes
+
+        # Try per-monitor DPI awareness where available (Windows 8.1+)
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+            logger.info("Set process DPI awareness to per-monitor.")
+        except Exception:
+            # Fallback to older API
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+                logger.info("Set process DPI awareness (legacy API).")
+            except Exception:
+                logger.debug("Could not set process DPI awareness; continuing.")
+    except Exception:
+        # If ctypes fails to import or call, continue silently
+        pass
 
 
 def _get_monitor_index_for_point(monitors: list[dict], x: int, y: int) -> int:
@@ -23,14 +47,21 @@ def _get_monitor_index_for_point(monitors: list[dict], x: int, y: int) -> int:
     return 1
 
 
-def _draw_cursor(image: Image.Image, cursor_pos: tuple[int, int], monitor: dict) -> None:
+def _draw_cursor(
+    image: Image.Image,
+    cursor_pos: tuple[int, int],
+    monitor: dict,
+    radius: int = 8,
+    color: tuple[int, int, int] = (255, 0, 0),
+    outline_width: int = 3,
+) -> None:
     draw = ImageDraw.Draw(image)
     cx, cy = cursor_pos
     # Transform to monitor-local coordinates
     mx = cx - monitor["left"]
     my = cy - monitor["top"]
-    r = 8
-    draw.ellipse((mx - r, my - r, mx + r, my + r), outline=(255, 0, 0), width=3)
+    r = radius
+    draw.ellipse((mx - r, my - r, mx + r, my + r), outline=color, width=outline_width)
 
 
 @dataclass
@@ -74,9 +105,26 @@ class ScreenCapture:
                     monitors = sct.monitors
                     mon_idx = _get_monitor_index_for_point(monitors, cursor_x, cursor_y)
                     mon = monitors[mon_idx]
-                    raw = sct.grab(mon)
+                    # Attempt the grab with a retry for transient failures
+                    raw = None
+                    for attempt in range(2):
+                        try:
+                            raw = sct.grab(mon)
+                            break
+                        except Exception as e:
+                            logger.warning(f"mss.grab failed (attempt {attempt+1}): {e}")
+                            time.sleep(0.02)
+                    if raw is None:
+                        raise RuntimeError("mss.grab failed after retries")
                     img = Image.frombytes("RGB", raw.size, raw.rgb)
-                    _draw_cursor(img, (cursor_x, cursor_y), mon)
+                    _draw_cursor(
+                        img,
+                        (cursor_x, cursor_y),
+                        mon,
+                        radius=self._cursor_radius,
+                        color=self._cursor_color,
+                        outline_width=self._cursor_outline_width,
+                    )
 
                     folder = day_folder(self.config.output_base)
                     filename = utc_iso_millis() + ".png"
@@ -115,9 +163,26 @@ class ScreenCapture:
                 monitors = sct.monitors
                 mon_idx = _get_monitor_index_for_point(monitors, cursor_x, cursor_y)
                 mon = monitors[mon_idx]
-                raw = sct.grab(mon)
+                # attempt grab with a retry
+                raw = None
+                for attempt in range(2):
+                    try:
+                        raw = sct.grab(mon)
+                        break
+                    except Exception as e:
+                        logger.warning(f"capture_once: mss.grab failed (attempt {attempt+1}): {e}")
+                        time.sleep(0.02)
+                if raw is None:
+                    raise RuntimeError("capture_once: mss.grab failed after retries")
                 img = Image.frombytes("RGB", raw.size, raw.rgb)
-                _draw_cursor(img, (cursor_x, cursor_y), mon)
+                _draw_cursor(
+                    img,
+                    (cursor_x, cursor_y),
+                    mon,
+                    radius=self._cursor_radius,
+                    color=self._cursor_color,
+                    outline_width=self._cursor_outline_width,
+                )
                 folder = day_folder(self.config.output_base)
                 filename = utc_iso_millis() + ".png"
                 path = os.path.join(folder, filename)

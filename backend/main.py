@@ -14,6 +14,7 @@ import threading
 import time
 import uuid
 from typing import Dict
+import mss
 
 
 OUTPUT_BASE = os.path.join(os.path.dirname(__file__), "..", "data")
@@ -157,7 +158,8 @@ def ext_event(payload: dict = Body(...)) -> dict:
         except Exception:
             return {"ok": False, "error": "merge_failed"}
 
-    # No matching OS click — write ext-only record
+    # No matching OS click — write ext-only record. If extension provided global coords,
+    # use them to compute display_id and store global x/y.
     record = {
         "source": "ext",
         "text": payload.get("text"),
@@ -169,6 +171,32 @@ def ext_event(payload: dict = Body(...)) -> dict:
         "window_title": payload.get("title"),
         "display_id": payload.get("display_id"),
     }
+
+    gx = payload.get("global_x")
+    gy = payload.get("global_y")
+    try:
+        if gx is not None and gy is not None:
+            # Try to find monitor via mss
+            try:
+                with mss.mss() as sct:
+                    monitors = sct.monitors
+                    for idx in range(1, len(monitors)):
+                        mon = monitors[idx]
+                        if mon["left"] <= gx < mon["left"] + mon["width"] and mon["top"] <= gy < mon["top"] + mon["height"]:
+                            record["display_id"] = idx
+                            break
+            except Exception:
+                # ignore mss failures
+                pass
+            # store global coords as authoritative x/y
+            try:
+                record["x"] = int(gx)
+                record["y"] = int(gy)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     state.logger.log_click(record)
     return {"ok": True, "merged": False}
 

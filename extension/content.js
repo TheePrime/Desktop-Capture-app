@@ -82,6 +82,10 @@ async function handleClick(ev) {
       title: document.title,
       x: ev.clientX,
       y: ev.clientY,
+      // Approximate global screen coordinates (may be used by native host to map display)
+      global_x: Math.round((window.screenX || window.screenLeft || 0) + ev.clientX * (window.devicePixelRatio || 1)),
+      global_y: Math.round((window.screenY || window.screenTop || 0) + ev.clientY * (window.devicePixelRatio || 1)),
+      devicePixelRatio: window.devicePixelRatio || 1,
     };
     console.log('[Capture] Sending click event:', payload);
     

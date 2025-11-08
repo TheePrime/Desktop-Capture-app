@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+import os
 from datetime import datetime, timezone
 from threading import Thread
 from typing import Callable, Optional
@@ -10,6 +11,7 @@ import psutil
 from pynput import mouse
 import pyautogui
 import pygetwindow
+import mss
 
 logger = logging.getLogger(__name__)
 
@@ -34,28 +36,62 @@ def _get_active_window_title() -> Optional[str]:
 
 def _get_active_process_info() -> tuple[Optional[str], Optional[int]]:
     try:
-        win = pygetwindow.getActiveWindow()
-        if win and hasattr(win, "_hWnd"):
-            # Fallback: use foreground process by mouse position
-            for p in psutil.process_iter(attrs=["pid", "name"]):
-                # We can't reliably map hWnd -> pid without win32, keep simple
+        # Platform-specific fast path for Windows using win32 APIs
+        if os.name == "nt":
+            try:
+                import win32gui
+                import win32process
+
+                hwnd = win32gui.GetForegroundWindow()
+                if hwnd:
+                    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                    try:
+                        p = psutil.Process(pid)
+                        return p.name(), pid
+                    except Exception:
+                        return None, pid
+            except Exception:
+                # If pywin32 isn't available, fall back to generic method below
                 pass
-        # Use current process under cursor via psutil as placeholder
-        name = None
-        pid = None
-        return name, pid
+
+        # Generic fallback: try to guess process by active window title
+        win = pygetwindow.getActiveWindow()
+        if win:
+            title = getattr(win, "title", None) or getattr(win, "name", None)
+            if title:
+                # Try to find a process whose name or cmdline contains parts of the title
+                title_lower = title.lower()
+                for p in psutil.process_iter(attrs=["pid", "name", "cmdline"]):
+                    try:
+                        name = (p.info.get("name") or "")
+                        cmd = " ".join(p.info.get("cmdline") or [])
+                        if name and name.lower() in title_lower:
+                            return name, p.info.get("pid")
+                        if cmd and any(part.lower() in title_lower for part in (name,)):
+                            return name, p.info.get("pid")
+                    except Exception:
+                        continue
+
+        return None, None
     except Exception:
         return None, None
 
 
 def _get_display_id_for_point(x: int, y: int) -> int:
-    # Heuristic: derive display index from position
+    # Use the same monitor mapping as capture.py (mss.monitors)
     try:
-        screens = pyautogui.screenInfo()
+        with mss.mss() as sct:
+            monitors = sct.monitors
+            # monitors[0] is virtual screen; real monitors start at 1
+            for idx in range(1, len(monitors)):
+                mon = monitors[idx]
+                if mon["left"] <= x < mon["left"] + mon["width"] and mon["top"] <= y < mon["top"] + mon["height"]:
+                    return idx
+            # Fallback to primary monitor (1)
+            return 1
     except Exception:
-        screens = None
-    # If pyautogui doesn't provide, fallback to 0
-    return 0
+        # Best-effort fallback
+        return 0
 
 
 @dataclass

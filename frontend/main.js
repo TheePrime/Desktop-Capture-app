@@ -111,9 +111,18 @@ function registerIpcHandlersOnce() {
   ipcHandlersRegistered = true;
 
   ipcMain.handle('tracking:status', () => ({ isTracking, hz: currentHz }));
-  ipcMain.handle('tracking:start', () => { isTracking = true; return { success: true }; });
-  ipcMain.handle('tracking:stop', () => { isTracking = false; return { success: true }; });
-  ipcMain.handle('tracking:setHz', (_event, hz) => { currentHz = parseFloat(hz); return { success: true }; });
+  ipcMain.handle('tracking:start', () => { startTrackingLoop(); return { success: true }; });
+  ipcMain.handle('tracking:stop', () => { stopTrackingLoop(); return { success: true }; });
+  ipcMain.handle('tracking:setHz', (_event, hz) => { 
+    const val = parseFloat(hz);
+    if (!Number.isNaN(val) && val > 0) {
+      currentHz = val;
+      if (isTracking) {
+        restartTrackingLoop();
+      }
+    }
+    return { success: true };
+  });
   ipcMain.handle('take-screenshot', async () => await captureScreenshot());
 }
 
@@ -133,6 +142,7 @@ app.on('window-all-closed', async () => {
   if (logWatcher) {
     try { logWatcher.close(); } catch {}
   }
+  stopTrackingLoop();
   if (process.platform !== 'darwin') app.quit();
 });
 
@@ -191,6 +201,40 @@ async function startLogWatcher() {
       console.error('[Electron] Error reading log file:', e);
     }
   });
+}
+
+function startTrackingLoop() {
+  if (isTracking) return; // already running
+  isTracking = true;
+  const intervalMs = Math.max(100, Math.round(1000 / (currentHz || 1)));
+  if (trackingInterval) clearInterval(trackingInterval);
+  trackingInterval = setInterval(async () => {
+    try {
+      const screenshot = await captureScreenshot();
+      if (mainWindow && screenshot) {
+        mainWindow.webContents.send('screenshot-tick', {
+          timestamp: new Date().toISOString(),
+          screenshot
+        });
+      }
+    } catch (e) {
+      console.error('[Electron] Periodic capture failed:', e);
+    }
+  }, intervalMs);
+}
+
+function stopTrackingLoop() {
+  isTracking = false;
+  if (trackingInterval) {
+    clearInterval(trackingInterval);
+    trackingInterval = null;
+  }
+}
+
+function restartTrackingLoop() {
+  if (!isTracking) return;
+  stopTrackingLoop();
+  startTrackingLoop();
 }
 
 

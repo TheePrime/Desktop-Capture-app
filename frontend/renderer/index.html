@@ -41,7 +41,7 @@
         display: flex;
         flex-direction: column;
         height: 100vh;
-        overflow: hidden;
+        overflow: hidden; /* Sidebar is not scrollable */
       }
 
       .main-content {
@@ -197,7 +197,7 @@
     <div class="layout">
       <aside class="sidebar">
         <div class="sidebar-header">
-          <h1>Activity Log</h1>
+          <h1>Activity Tracker</h1>
           <div id="status" class="status-badge inactive">Initializing...</div>
         </div>
 
@@ -211,30 +211,51 @@
           </div>
         </div>
 
-        <div class="click-list" id="clickList">
-          <!-- Click entries will be inserted here -->
-        </div>
+        <nav class="nav">
+          <button id="navActivities" class="nav-item active">Activities</button>
+          <button id="navScreenshots" class="nav-item">Screenshots</button>
+        </nav>
       </aside>
 
       <main class="main-content">
-        <div class="preview-header">
-          <h2>Activity Preview</h2>
-          <div class="toolbar">
-            <button id="exportBtn" class="secondary-button">Export Data</button>
-            <button id="clearBtn" class="secondary-button">Clear All</button>
+        <section id="viewActivities" class="view active">
+          <div class="preview-header">
+            <h2>Activities</h2>
+            <div class="toolbar">
+              <button id="exportBtn" class="secondary-button">Export Data</button>
+              <button id="clearBtn" class="secondary-button">Clear All</button>
+            </div>
           </div>
-        </div>
-        
-        <div class="preview-content" id="previewContent">
-          <div class="preview-placeholder">
-            <div class="placeholder-icon">📸</div>
-            <p>Select an activity from the sidebar to view details</p>
-          </div>
-        </div>
 
-        <div class="preview-details" id="previewDetails">
-          <!-- Click details will be shown here -->
-        </div>
+          <div class="activity-layout">
+            <div class="activity-list" id="activityList"></div>
+            <div class="activity-right">
+              <div class="preview-content" id="previewContent">
+                <div class="preview-placeholder">
+                  <div class="placeholder-icon">📸</div>
+                  <p>Select an activity from the list to view details</p>
+                </div>
+              </div>
+
+              <div class="preview-details" id="previewDetails"></div>
+
+              <div class="data-panel">
+                <div class="data-panel-header">
+                  <h3>Activity Data</h3>
+                  <span class="muted">Live view of exported data</span>
+                </div>
+                <div class="data-table" id="dataTable"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="viewScreenshots" class="view">
+          <div class="preview-header">
+            <h2>Screenshots</h2>
+          </div>
+          <div class="screenshot-grid" id="screenshotGrid"></div>
+        </section>
       </main>
     </div>
 
@@ -276,11 +297,89 @@
         border-top: 1px solid var(--border);
       }
 
-      .click-list {
-        flex: 1;
+      .nav {
+        padding: 0.5rem 1rem 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        border-top: 1px solid var(--border);
+      }
+
+      .nav-item {
+        text-align: left;
+        padding: 0.6rem 0.75rem;
+        border-radius: 0.5rem;
+        border: 1px solid var(--border);
+        background: white;
+        cursor: pointer;
+      }
+
+      .nav-item.active {
+        background: var(--primary);
+        color: white;
+        border-color: var(--primary);
+      }
+
+      .view { display: none; height: 100%; }
+      .view.active { display: block; }
+
+      .activity-layout {
+        display: grid;
+        grid-template-columns: 360px 1fr;
+        height: calc(100% - 64px);
+      }
+
+      .activity-list {
+        border-right: 1px solid var(--border);
         overflow-y: auto;
         padding: 0.5rem;
       }
+
+      .activity-right {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+
+      .screenshot-grid {
+        padding: 1rem;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: 0.75rem;
+        overflow-y: auto;
+        height: calc(100% - 64px);
+      }
+
+      .shot-card {
+        background: white;
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        padding: 0.5rem;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .shot-card img {
+        width: 100%;
+        height: 100px;
+        object-fit: cover;
+        border-radius: 0.25rem;
+        border: 1px solid var(--border);
+      }
+
+      .shot-card .time {
+        font-size: 0.8rem;
+        color: var(--muted);
+      }
+
+      .data-panel { padding: 1rem; }
+      .data-panel-header { display: flex; align-items: center; gap: 0.75rem; }
+      .data-table { overflow: auto; max-height: 240px; border: 1px solid var(--border); border-radius: 0.5rem; }
+      table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+      th, td { padding: 0.5rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+      th { background: #fafafa; position: sticky; top: 0; }
 
       .click-entry {
         padding: 0.75rem;

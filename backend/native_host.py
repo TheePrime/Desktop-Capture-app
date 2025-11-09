@@ -32,8 +32,8 @@ def read_message():
         # Read the message length (first 4 bytes)
         raw_length = sys.stdin.buffer.read(4)
         if not raw_length:
-            logger.warning("Native host: stdin closed, exiting gracefully")
-            sys.exit(0)
+            # stdin closed - this is normal when Chrome disconnects
+            return None
             
         # Unpack message length as unsigned int
         try:
@@ -137,49 +137,11 @@ def write_log(data):
         "screenshot_path": None,
     }
     
-    # Always try to map display_id from coordinates
-    gx = data.get("global_x")
-    gy = data.get("global_y")
-    if gx is not None and gy is not None:
-        try:
-            # Try Win32 API first
-            if os.name == "nt":
-                import win32api
-                monitor = win32api.MonitorFromPoint((gx, gy))
-                if monitor:
-                    # Get all monitors and find our index
-                    monitors = win32api.EnumDisplayMonitors()
-                    for i, m in enumerate(monitors, 1):
-                        if m[0] == monitor:
-                            record["display_id"] = i
-                            logger.info(f"Win32API: Mapped ({gx},{gy}) to display {i}")
-                            break
-        except Exception as e:
-            logger.warning(f"Win32 display mapping failed: {e}")
-            
-        # Fallback to MSS mapping if needed
-        if not record["display_id"]:
-    # If the extension supplied a file:// URL (Chrome PDF viewer), record the
-    # local document path in `doc_path` and normalize `url_or_path` to that path.
-    try:
-        if url and isinstance(url, str) and url.startswith("file://"):
-            parsed = urlparse(url)
-            path = unquote(parsed.path or "")
-            # On Windows the path may start with a leading slash ("/C:/...")
-            if os.name == "nt" and path.startswith("/") and len(path) > 2 and path[2] == ":":
-                path = path.lstrip("/")
-            record["doc_path"] = path
-            record["url_or_path"] = path
-            # Keep app_name as chrome (embedded PDF viewer) for now
-    except Exception:
-        # Don't let parsing errors break the native host
-        pass
-
     # If extension provided global coordinates, try to map to a display id.
     # Heuristic: try the raw coords first; if no monitor matches and the
     # extension provided a devicePixelRatio, also try scaled variants (gx * dpr)
     # and (gx / dpr) to handle cases where the extension reported CSS pixels
-    # rather than physical pixels. Log monitors and attempts to native_host.log
+    # rather than physical pixels.
     try:
         gx = data.get("global_x")
         gy = data.get("global_y")
@@ -262,8 +224,17 @@ def write_log(data):
 
 
 def main():
-    ensure_log_dir()
-    logger.info("Native host starting up")
+    try:
+        ensure_log_dir()
+        logger.info("Native host starting up")
+        logger.info(f"Python version: {sys.version}")
+        logger.info(f"Working directory: {os.getcwd()}")
+    except Exception as e:
+        # Emergency logging to a separate file if regular logging fails
+        with open(os.path.join(os.path.dirname(__file__), 'startup_error.log'), 'a') as f:
+            f.write(f"[{datetime.datetime.now()}] Startup error: {e}\n")
+        raise
+    
     error_count = 0
     max_errors = 5  # Allow up to 5 errors before exiting
     
@@ -272,12 +243,9 @@ def main():
             # Read the next message
             message = read_message()
             if message is None:
-                error_count += 1
-                logger.warning(f"Failed to read message (error {error_count} of {max_errors})")
-                if error_count >= max_errors:
-                    logger.error("Too many errors, exiting")
-                    sys.exit(1)
-                continue
+                # stdin closed or error reading - exit gracefully
+                logger.info("Native host: Connection closed, exiting")
+                break
                 
             # Reset error count on successful message
             error_count = 0

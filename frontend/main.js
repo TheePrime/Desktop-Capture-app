@@ -28,9 +28,15 @@ function setupWebSocketServer() {
                 const data = JSON.parse(message);
                 if (mainWindow && isTracking) {
                     const screenshot = await captureScreenshot();
+                    // save to disk for persistence
+                    let screenshot_path = null;
+                    if (screenshot) {
+                      screenshot_path = await saveScreenshotToDisk(screenshot);
+                    }
                     mainWindow.webContents.send('click-captured', {
-                        ...data,
-                        screenshot
+                      ...data,
+                      screenshot,
+                      screenshot_path
                     });
                 }
             } catch (err) {
@@ -63,7 +69,17 @@ async function notifyBackendStatus(active) {
 // Capture screenshot of all displays
 async function captureScreenshot() {
   try {
-    const displays = screen.getAllDisplays();
+    // Prefer renderer capture path which can use getUserMedia to include the cursor.
+    if (mainWindow && mainWindow.webContents) {
+      try {
+        const dataUrl = await mainWindow.webContents.executeJavaScript('window.captureScreenWithCursor && window.captureScreenWithCursor()', true);
+        if (dataUrl) return dataUrl;
+      } catch (e) {
+        console.warn('[Electron] captureScreenshot: renderer capture failed, falling back to thumbnail:', e);
+      }
+    }
+
+    // Fallback: desktopCapturer thumbnail (may not include cursor on some platforms)
     const sources = await desktopCapturer.getSources({ 
       types: ['screen'],
       thumbnailSize: {
@@ -71,13 +87,8 @@ async function captureScreenshot() {
         height: 1080
       }
     });
-
-    // Combine all screenshots into one base64 string
-    const screenshots = sources.map(source => {
-      return source.thumbnail.toDataURL();
-    });
-
-    return screenshots[0]; // For now just return the primary display
+    const screenshots = sources.map(source => source.thumbnail.toDataURL());
+    return screenshots[0] || null;
   } catch (err) {
     console.error('Screenshot capture failed:', err);
     return null;
@@ -163,6 +174,42 @@ async function ensureFile(filePath) {
   } catch {}
 }
 
+async function ensureDir(dirPath) {
+  try {
+    await fsPromises.mkdir(dirPath, { recursive: true });
+  } catch (e) {
+    // ignore
+  }
+}
+
+// Save a dataURL (base64 PNG) to disk and return absolute path
+async function saveScreenshotToDisk(dataUrl) {
+  try {
+    if (!dataUrl) return null;
+    const dayFolder = getTodayFolder();
+    const screenshotsDir = path.join(path.resolve(__dirname, '..', 'data'), dayFolder, 'screenshots');
+    await ensureDir(screenshotsDir);
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `shot-${ts}.png`;
+    const filePath = path.join(screenshotsDir, filename);
+
+    const matches = dataUrl.match(/^data:(image\/(png|jpeg));base64,(.+)$/);
+    let buffer;
+    if (matches && matches[3]) {
+      buffer = Buffer.from(matches[3], 'base64');
+    } else {
+      // If it's not a data URL, maybe it's already a file path
+      return null;
+    }
+
+    await fsPromises.writeFile(filePath, buffer);
+    return filePath;
+  } catch (e) {
+    console.error('[Electron] Failed to save screenshot to disk:', e);
+    return null;
+  }
+}
+
 async function startLogWatcher() {
   // Determine clicks.ndjson path for today
   const dataRoot = path.resolve(__dirname, '..', 'data');
@@ -204,23 +251,35 @@ async function startLogWatcher() {
 }
 
 function startTrackingLoop() {
-  if (isTracking) return; // already running
+  if (isTracking) {
+    console.log('[Electron] Already tracking, skipping start');
+    return; // already running
+  }
   isTracking = true;
   const intervalMs = Math.max(100, Math.round(1000 / (currentHz || 1)));
+  console.log(`[Electron] Starting screenshot loop at ${currentHz} Hz (interval: ${intervalMs}ms)`);
   if (trackingInterval) clearInterval(trackingInterval);
   trackingInterval = setInterval(async () => {
     try {
+      console.log('[Electron] Capturing screenshot...');
       const screenshot = await captureScreenshot();
       if (mainWindow && screenshot) {
+        // Save a copy to disk, then send both data and path to renderer
+        const screenshot_path = await saveScreenshotToDisk(screenshot);
+        console.log('[Electron] Sending screenshot-tick to renderer (path:', screenshot_path, ')');
         mainWindow.webContents.send('screenshot-tick', {
           timestamp: new Date().toISOString(),
-          screenshot
+          screenshot,
+          screenshot_path
         });
+      } else {
+        console.warn('[Electron] Screenshot capture returned null or no mainWindow');
       }
     } catch (e) {
       console.error('[Electron] Periodic capture failed:', e);
     }
   }, intervalMs);
+  console.log('[Electron] Screenshot loop started');
 }
 
 function stopTrackingLoop() {

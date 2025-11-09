@@ -1,4 +1,4 @@
-const { ipcRenderer } = require('electron');
+const { ipcRenderer, desktopCapturer } = require('electron');
 const path = require('path');
 const fs = require('fs').promises;
 
@@ -164,22 +164,37 @@ ipcRenderer.on('click-captured', async (event, clickInfo) => {
 });
 
 // Handle periodic screenshot ticks
-ipcRenderer.on('screenshot-tick', async (event, { timestamp, screenshot }) => {
+ipcRenderer.on('screenshot-tick', async (event, { timestamp, screenshot, screenshot_path }) => {
+    console.log('[Renderer] Received screenshot-tick event');
     try {
-        await addScreenshotEntry({ timestamp, screenshot });
+        console.log('[Renderer] Screenshot timestamp:', timestamp);
+        // prefer saved file path if provided to avoid huge base64 payloads in renderer
+        let shot = null;
+        if (screenshot_path) {
+            shot = screenshot_path.startsWith('file://') ? screenshot_path : 'file://' + screenshot_path.replace(/\\/g, '/');
+            console.log('[Renderer] Using screenshot_path:', shot);
+        } else {
+            shot = screenshot;
+            console.log('[Renderer] Screenshot data length:', shot ? shot.length : 'null');
+        }
+        await addScreenshotEntry({ timestamp, screenshot: shot });
     } catch (err) {
-        console.error('Failed to add screenshot:', err);
+        console.error('[Renderer] Failed to add screenshot:', err);
     }
 });
 
 async function addScreenshotEntry({ timestamp, screenshot }) {
+    console.log('[Renderer] addScreenshotEntry called');
+    console.log('[Renderer] screenshotGrid element:', screenshotGrid);
     const entry = { id: Date.now(), timestamp, screenshot };
     screenshotsData.unshift(entry);
     if (screenshotsData.length > MAX_SCREENSHOTS) {
         screenshotsData = screenshotsData.slice(0, MAX_SCREENSHOTS);
     }
     localStorage.setItem('screenshotsData', JSON.stringify(screenshotsData));
+    console.log('[Renderer] Calling refreshScreenshotGrid, total screenshots:', screenshotsData.length);
     refreshScreenshotGrid();
+    console.log('[Renderer] Screenshot saved successfully');
 }
 
 function refreshScreenshotGrid() {
@@ -343,6 +358,70 @@ clearBtn.addEventListener('click', async () => {
         dataTable.innerHTML = '';
     }
 });
+
+// --- DEBUG: Confirm renderer script loaded and IPC event delivery ---
+try {
+    // ipcRenderer is already required at the top of this file; avoid redeclaring it.
+    ipcRenderer.on('screenshot-tick', (event, data) => {
+        console.log('[Renderer TEST] screenshot-tick received:', data);
+    });
+    console.log('[Renderer TEST] IPC listener registered');
+} catch (e) {
+    console.error('[Renderer TEST] Failed to register IPC listener:', e);
+}
+
+// Expose a capture function on window that captures the screen including the cursor.
+// Uses desktopCapturer + getUserMedia, draws a single frame to canvas, then returns a dataURL.
+window.captureScreenWithCursor = async function () {
+    try {
+        const sources = await desktopCapturer.getSources({ types: ['screen'] });
+        if (!sources || sources.length === 0) {
+            throw new Error('No screen sources available');
+        }
+        // Pick primary display (first source). Could be improved to pick by display id.
+        const source = sources[0];
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: {
+                mandatory: {
+                    chromeMediaSource: 'desktop',
+                    chromeMediaSourceId: source.id,
+                    maxWidth: window.screen.width * devicePixelRatio,
+                    maxHeight: window.screen.height * devicePixelRatio,
+                }
+            }
+        });
+
+        // Create a video element to render the stream and capture one frame
+        const video = document.createElement('video');
+        video.style.position = 'fixed';
+        video.style.left = '-10000px';
+        video.style.top = '-10000px';
+        document.body.appendChild(video);
+        video.srcObject = stream;
+        await video.play();
+
+        // Wait a tick for the video to have current frame
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth || window.screen.width * devicePixelRatio;
+        canvas.height = video.videoHeight || window.screen.height * devicePixelRatio;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // stop all tracks
+        stream.getTracks().forEach(t => t.stop());
+        video.remove();
+
+        const dataUrl = canvas.toDataURL('image/png');
+        return dataUrl;
+    } catch (e) {
+        console.error('[Renderer] captureScreenWithCursor failed:', e);
+        return null;
+    }
+};
 
 // Initialize
 updateStatus();

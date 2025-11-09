@@ -134,7 +134,8 @@ def write_log(data):
         "url_or_path": doc_path if doc_path else url,
         "doc_path": doc_path,
         "text": text,
-        "screenshot_path": None,
+        # If the extension or caller provided a screenshot path (or URL), preserve it
+        "screenshot_path": data.get("screenshot_path") if data.get("screenshot_path") else None,
     }
     
     # If extension provided global coordinates, try to map to a display id.

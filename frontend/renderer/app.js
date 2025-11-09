@@ -372,6 +372,16 @@ try {
 
 // Expose a capture function on window that captures the screen including the cursor.
 // Uses desktopCapturer + getUserMedia, draws a single frame to canvas, then returns a dataURL.
+let lastCursorPosition = { x: 0, y: 0 };
+
+// Track cursor position globally
+document.addEventListener('mousemove', (e) => {
+    lastCursorPosition = {
+        x: e.screenX,
+        y: e.screenY
+    };
+});
+
 window.captureScreenWithCursor = async function () {
     try {
         const sources = await desktopCapturer.getSources({ types: ['screen'] });
@@ -389,7 +399,8 @@ window.captureScreenWithCursor = async function () {
                     chromeMediaSourceId: source.id,
                     maxWidth: window.screen.width * devicePixelRatio,
                     maxHeight: window.screen.height * devicePixelRatio,
-                }
+                },
+                cursor: 'always'  // Request cursor to be included
             }
         });
 
@@ -410,6 +421,35 @@ window.captureScreenWithCursor = async function () {
         canvas.height = video.videoHeight || window.screen.height * devicePixelRatio;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // Draw a more visible cursor indicator at the last known position
+        const scaleX = canvas.width / window.screen.width;
+        const scaleY = canvas.height / window.screen.height;
+        const cursorX = lastCursorPosition.x * scaleX;
+        const cursorY = lastCursorPosition.y * scaleY;
+
+        // Outer glow
+        const gradient = ctx.createRadialGradient(cursorX, cursorY, 2, cursorX, cursorY, 20);
+        gradient.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+        gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.4)');
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        
+        ctx.beginPath();
+        ctx.arc(cursorX, cursorY, 20, 0, 2 * Math.PI);
+        ctx.fillStyle = gradient;
+        ctx.fill();
+        
+        // Main cursor circle
+        ctx.beginPath();
+        ctx.arc(cursorX, cursorY, 10, 0, 2 * Math.PI);
+        ctx.fillStyle = 'rgba(66, 133, 244, 0.9)';
+        ctx.fill();
+        
+        // Inner highlight
+        ctx.beginPath();
+        ctx.arc(cursorX, cursorY, 4, 0, 2 * Math.PI);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.fill();
 
         // stop all tracks
         stream.getTracks().forEach(t => t.stop());

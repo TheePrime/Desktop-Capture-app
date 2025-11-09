@@ -88,6 +88,44 @@ async function captureScreenshot() {
       }
     });
     const screenshots = sources.map(source => source.thumbnail.toDataURL());
+    // If backend has recently saved a screenshot (which includes a cursor overlay via backend/capture.py),
+    // prefer that image to ensure the cursor is visible. Look for recent files in data/<today>/screenshots.
+    try {
+      const dataRoot = path.resolve(__dirname, '..', 'data');
+      const dayFolder = getTodayFolder();
+      const shotsDir = path.join(dataRoot, dayFolder, 'screenshots');
+      const maxAgeMs = 3000; // 3 seconds
+      const now = Date.now();
+      let files = [];
+      try {
+        files = await fsPromises.readdir(shotsDir);
+      } catch (e) {
+        files = [];
+      }
+      let newest = null;
+      for (const f of files) {
+        if (!f.toLowerCase().endsWith('.png')) continue;
+        try {
+          const st = await fsPromises.stat(path.join(shotsDir, f));
+          if (!newest || st.mtimeMs > newest.mtimeMs) {
+            newest = { name: f, mtimeMs: st.mtimeMs };
+          }
+        } catch (e) {
+          continue;
+        }
+      }
+      if (newest && now - newest.mtimeMs <= maxAgeMs) {
+        try {
+          const buf = await fsPromises.readFile(path.join(shotsDir, newest.name));
+          return `data:image/png;base64,${buf.toString('base64')}`;
+        } catch (e) {
+          // fall through to thumbnail
+        }
+      }
+    } catch (e) {
+      console.warn('[Electron] captureScreenshot: recent backend screenshot check failed:', e);
+    }
+
     return screenshots[0] || null;
   } catch (err) {
     console.error('Screenshot capture failed:', err);

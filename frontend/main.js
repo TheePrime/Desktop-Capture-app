@@ -15,6 +15,24 @@ if (!fetchImpl) {
 
 const BACKEND = 'http://127.0.0.1:8000';
 
+// Track if we've notified backend of app status
+let backendNotified = false;
+
+async function notifyBackendStatus(active) {
+  try {
+    if (!fetchImpl) return;
+    const res = await fetchImpl(`${BACKEND}/electron_status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active })
+    });
+    backendNotified = active;
+    console.log('[Electron] Backend status notification:', await res.json());
+  } catch (e) {
+    console.error('[Electron] Failed to notify backend:', e);
+  }
+}
+
 async function createWindow() {
   const win = new BrowserWindow({
     width: 800,
@@ -27,6 +45,9 @@ async function createWindow() {
   });
 
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  
+  // Notify backend when window is ready
+  await notifyBackendStatus(true);
 }
 
 app.whenReady().then(() => {
@@ -36,7 +57,9 @@ app.whenReady().then(() => {
   });
 });
 
-app.on('window-all-closed', () => {
+app.on('window-all-closed', async () => {
+  // Notify backend we're shutting down
+  await notifyBackendStatus(false);
   if (process.platform !== 'darwin') app.quit();
 });
 

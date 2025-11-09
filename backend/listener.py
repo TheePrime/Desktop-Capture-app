@@ -36,15 +36,51 @@ def _get_active_window_title() -> Optional[str]:
 
 def _get_active_process_info() -> tuple[Optional[str], Optional[int]]:
     try:
-        # Simple approach: look for Chrome directly
-        for proc in psutil.process_iter(['pid', 'name']):
+        # First try to get active window info
+        active_win = None
+        try:
+            active_win = pygetwindow.getActiveWindow()
+        except Exception:
+            pass
+
+        if active_win:
             try:
-                if 'chrome' in proc.info['name'].lower():
-                    return proc.info['name'], proc.info['pid']
+                # Windows-specific: get PID from window handle
+                if os.name == 'nt':
+                    import win32process
+                    import win32gui
+                    hwnd = active_win._hWnd
+                    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                    try:
+                        proc = psutil.Process(pid)
+                        return proc.name(), pid
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        # Fallback: scan for known browser processes
+        browser_names = ['chrome', 'msedge', 'firefox', 'brave', 'opera']
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                name = proc.info['name'].lower()
+                # Match browser processes
+                if any(b in name for b in browser_names):
+                    # If we have an active window title, try to match it to browser tabs
+                    if active_win and active_win.title:
+                        title = active_win.title.lower()
+                        cmdline = ' '.join(proc.info.get('cmdline', [])).lower()
+                        if title in cmdline or any(b in title for b in browser_names):
+                            return proc.info['name'], proc.info['pid']
+                    else:
+                        # No title to match - return first browser found
+                        return proc.info['name'], proc.info['pid']
             except Exception:
                 continue
+
         return None, None
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error getting process info: {e}")
         return None, None
 
         # Generic fallback: try to guess process by active window title
@@ -129,26 +165,64 @@ def _find_file_in_common_places(filename: str) -> Optional[str]:
 
 
 def _get_display_id_for_point(x: int, y: int) -> int:
-    """Simple display mapping - uses mss to get monitor info."""
+    """Enhanced display mapping with Win32 API support and device pixel ratio handling."""
     try:
+        # Try Win32 API first for more accurate monitor info
+        if os.name == 'nt':
+            try:
+                import win32api
+                monitor = win32api.MonitorFromPoint((x, y))
+                if monitor:
+                    info = win32api.GetMonitorInfo(monitor)
+                    # Convert monitor number to 1-based index
+                    display_num = len(win32api.EnumDisplayMonitors()) 
+                    for i, m in enumerate(win32api.EnumDisplayMonitors(), 1):
+                        if m[0] == monitor:
+                            logger.info(f"Win32API: Point ({x},{y}) matched to monitor {i} of {display_num}")
+                            return i
+            except Exception as e:
+                logger.warning(f"Win32 monitor detection failed: {e}")
+
+        # Fallback to MSS
         with mss.mss() as sct:
-            # Get list of monitors (skip first which is the virtual screen)
+            # Skip virtual screen, get physical monitors
             real_monitors = sct.monitors[1:]
-            # Log monitor layout for debugging
-            for idx, mon in enumerate(real_monitors, 1):
-                logger.info(f"Monitor {idx}: left={mon['left']}, top={mon['top']}, width={mon['width']}, height={mon['height']}")
             
-            # Find which monitor contains the point
+            # Log monitor layout
+            logger.info("Monitor layout:")
+            for idx, mon in enumerate(real_monitors, 1):
+                logger.info(f"Monitor {idx}: {mon['left']},{mon['top']} {mon['width']}x{mon['height']}")
+
+            # Try direct match first
             for idx, mon in enumerate(real_monitors, 1):
                 if (mon['left'] <= x < mon['left'] + mon['width'] and 
                     mon['top'] <= y < mon['top'] + mon['height']):
-                    logger.info(f"Point ({x},{y}) matched to monitor {idx}")
+                    logger.info(f"MSS direct match: ({x},{y}) -> monitor {idx}")
                     return idx
-            
-            logger.info(f"Point ({x},{y}) outside all monitors, using primary (1)")
+
+            # Try with device pixel ratio adjustment
+            try:
+                if os.name == 'nt':
+                    import ctypes
+                    user32 = ctypes.windll
+                    dpi = user32.user32.GetDpiForSystem()
+                    scale = dpi / 96.0
+                    scaled_x = int(x / scale)
+                    scaled_y = int(y / scale)
+                    for idx, mon in enumerate(real_monitors, 1):
+                        if (mon['left'] <= scaled_x < mon['left'] + mon['width'] and 
+                            mon['top'] <= scaled_y < mon['top'] + mon['height']):
+                            logger.info(f"MSS scaled match: ({x},{y}) -> ({scaled_x},{scaled_y}) -> monitor {idx}")
+                            return idx
+            except Exception as e:
+                logger.warning(f"DPI scaling adjustment failed: {e}")
+
+            # If no match, use primary monitor
+            logger.info(f"No monitor match for ({x},{y}), using primary (1)")
             return 1
+            
     except Exception as e:
-        logger.error(f"Error mapping display: {e}")
+        logger.error(f"Display mapping failed: {e}")
         return 1
 
 

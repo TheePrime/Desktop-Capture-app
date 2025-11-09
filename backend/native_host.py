@@ -54,22 +54,65 @@ def write_log(data):
         logger.info(f"Received data: {json.dumps(data)}")
     except Exception:
         logger.warning("Could not log incoming data")
+        
+    # Try to get process info for Chrome
+    process_id = None
+    try:
+        import psutil
+        for proc in psutil.process_iter(['pid', 'name']):
+            try:
+                if 'chrome' in proc.info['name'].lower():
+                    # If we have a tab ID, try to match it in the command line
+                    tab_id = data.get('tabId')
+                    if tab_id:
+                        cmdline = ' '.join(proc.cmdline()).lower()
+                        if f'tab={tab_id}' in cmdline or str(tab_id) in cmdline:
+                            process_id = proc.info['pid']
+                            break
+                    else:
+                        # No tab ID - use first Chrome process found
+                        process_id = proc.info['pid']
+                        break
+            except Exception:
+                continue
+    except Exception as e:
+        logger.warning(f"Failed to get Chrome process info: {e}")
     record = {
         "timestamp_utc": ts,
         "x": data.get("x"),
         "y": data.get("y"),
         "app_name": "chrome",
-        "process_id": None,
+        "process_id": process_id,  # Use the process_id we found above
         "window_title": data.get("title"),
-        "display_id": data.get("display_id"),
+        "display_id": None,  # Will be set below
         "source": data.get("source", "ext"),
         "url_or_path": url,
-        # Optionally include doc_path when extension sends a file:// URL
-        # (parsed below)
-        # "doc_path": None,
         "text": text,
         "screenshot_path": None,
     }
+    
+    # Always try to map display_id from coordinates
+    gx = data.get("global_x")
+    gy = data.get("global_y")
+    if gx is not None and gy is not None:
+        try:
+            # Try Win32 API first
+            if os.name == "nt":
+                import win32api
+                monitor = win32api.MonitorFromPoint((gx, gy))
+                if monitor:
+                    # Get all monitors and find our index
+                    monitors = win32api.EnumDisplayMonitors()
+                    for i, m in enumerate(monitors, 1):
+                        if m[0] == monitor:
+                            record["display_id"] = i
+                            logger.info(f"Win32API: Mapped ({gx},{gy}) to display {i}")
+                            break
+        except Exception as e:
+            logger.warning(f"Win32 display mapping failed: {e}")
+            
+        # Fallback to MSS mapping if needed
+        if not record["display_id"]:
     # If the extension supplied a file:// URL (Chrome PDF viewer), record the
     # local document path in `doc_path` and normalize `url_or_path` to that path.
     try:

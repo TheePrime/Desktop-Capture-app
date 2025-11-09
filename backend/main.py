@@ -29,6 +29,9 @@ class AppState:
     def __init__(self) -> None:
         self.config = CaptureConfig(hz=1.0, output_base=os.path.abspath(OUTPUT_BASE))
         self.capture = ScreenCapture(self.config)
+        # Track electron app status
+        self.electron_active = False
+        self.electron_last_seen = 0
         # Hook capture callback so we can attach screenshots to pending clicks
         try:
             self.capture.on_capture = self._on_screenshot
@@ -152,7 +155,14 @@ def status() -> dict:
         "listener_running": state.listener.is_running(),
         "hz": state.config.hz,
         "output_base": state.config.output_base,
+        "electron_active": state.electron_active,
     }
+
+@app.post("/electron_status")
+def electron_status(active: bool = Body(..., embed=True)) -> dict:
+    state.electron_active = active
+    state.electron_last_seen = time.time()
+    return {"ok": True}
 
 
 @app.post("/start")
@@ -203,6 +213,11 @@ def recent_screenshots(seconds: float = 1.0) -> dict:
 
 @app.post("/ext_event")
 def ext_event(payload: dict = Body(...)) -> dict:
+    # Skip screenshot processing if Electron is not active
+    if not state.electron_active:
+        logger.info("Skipping screenshot attachment - Electron app not active")
+        payload["screenshot_path"] = None
+    
     # Payload expected from extension: {text, url, tabId?, profile?, x?, y?}
     now = time.time()
     px = payload.get("x")

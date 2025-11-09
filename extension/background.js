@@ -37,15 +37,27 @@ connectNativeHost();
 
 async function sendToBackend(payload) {
   try {
-    console.log('[Capture] Checking for recent screenshots...');
-    // First try to get any recent screenshots
-    const screenshotRes = await fetch(`${BACKEND}/recent_screenshots?seconds=0.5`);
-    if (screenshotRes.ok) {
-      const { screenshots = [] } = await screenshotRes.json();
-      if (screenshots.length > 0) {
-        payload.screenshot_path = screenshots[screenshots.length - 1];
-        console.log('[Capture] Found recent screenshot:', payload.screenshot_path);
+    // First check if Electron app is active
+    const statusRes = await fetch(`${BACKEND}/status`);
+    let electronActive = false;
+    if (statusRes.ok) {
+      const status = await statusRes.json();
+      electronActive = status.electron_active;
+    }
+
+    // Only check for screenshots if Electron is active
+    if (electronActive) {
+      console.log('[Capture] Checking for recent screenshots...');
+      const screenshotRes = await fetch(`${BACKEND}/recent_screenshots?seconds=0.5`);
+      if (screenshotRes.ok) {
+        const { screenshots = [] } = await screenshotRes.json();
+        if (screenshots.length > 0) {
+          payload.screenshot_path = screenshots[screenshots.length - 1];
+          console.log('[Capture] Found recent screenshot:', payload.screenshot_path);
+        }
       }
+    } else {
+      console.log('[Capture] Skipping screenshots - Electron app not active');
     }
 
     console.log('[Capture] Sending to backend:', payload);

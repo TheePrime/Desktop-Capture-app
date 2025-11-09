@@ -71,8 +71,37 @@ async function expandSeeMore(root) {
 }
 
 function nearestPostContainer(el) {
+  // Check if we're in a PDF viewer
+  console.log('[Capture] Checking for PDF viewer...');
+  console.log('[Capture] Current URL:', location.href);
+  console.log('[Capture] Content type:', document.contentType);
+  
+  // Try multiple methods to detect PDF
+  const isPdfEmbed = document.querySelector('embed[type="application/pdf"]');
+  const isPdfObject = document.querySelector('object[type="application/pdf"]');
+  const isPdfViewer = document.body.classList.contains('pdf-viewer');
+  const isPdfUrl = location.href.toLowerCase().includes('.pdf');
+  const isPdfMime = document.contentType === 'application/pdf';
+  
+  console.log('[Capture] PDF detection results:', {
+    isPdfEmbed: !!isPdfEmbed,
+    isPdfObject: !!isPdfObject,
+    isPdfViewer: isPdfViewer,
+    isPdfUrl: isPdfUrl,
+    isPdfMime: isPdfMime
+  });
+  
+  const isPdf = isPdfEmbed || isPdfObject || isPdfViewer || (isPdfUrl && isPdfMime);
+  if (isPdf) {
+    console.log('[Capture] PDF viewer detected');
+    return document.body; // Use whole document for PDFs
+  }
+
   // Simplified selector list - get any container that might have content
   const selectors = [
+    // PDF viewer containers
+    '#viewerContainer',
+    '.pdfViewer',
     // LinkedIn post containers
     '.feed-shared-update-v2',
     '.feed-shared-mini-update-v2',
@@ -151,6 +180,30 @@ function nearestPostContainer(el) {
 function extractTextFromContainer(container) {
   console.log('[Capture] Extracting text from container:', container.tagName, container.className);
   
+  // Check if we're in a PDF viewer
+  const isPdf = document.querySelector('embed[type="application/pdf"], object[type="application/pdf"]');
+  if (isPdf) {
+    console.log('[Capture] PDF extraction mode');
+    try {
+      // Try to get selected text first
+      const selection = window.getSelection();
+      if (selection && selection.toString().trim()) {
+        const text = selection.toString().trim();
+        console.log('[Capture] Got PDF selection:', text.slice(0, 100) + '...');
+        return text;
+      }
+      
+      // Try to get PDF file name from URL or title
+      const pdfName = location.pathname.split('/').pop() || document.title;
+      if (pdfName.toLowerCase().includes('.pdf')) {
+        console.log('[Capture] Using PDF filename:', pdfName);
+        return `Click in PDF: ${pdfName}`;
+      }
+    } catch (e) {
+      console.warn('[Capture] PDF text extraction error:', e);
+    }
+  }
+  
   // Try LinkedIn-specific selectors first
   const linkedInSelectors = [
     '.feed-shared-update-v2__description',
@@ -195,6 +248,25 @@ async function handleClick(ev) {
   try {
     console.log('[Capture] Click detected at:', ev.clientX, ev.clientY);
     console.log('[Capture] Screen coords:', window.screenX, window.screenY);
+    
+    // Check if we're in a PDF
+    const isPdf = document.querySelector('embed[type="application/pdf"], object[type="application/pdf"]');
+    let pdfPath = null;
+    let docPath = null;
+    
+    if (isPdf) {
+      console.log('[Capture] PDF click detected');
+      if (location.protocol === 'file:') {
+        // Local PDF file
+        pdfPath = decodeURIComponent(location.pathname);
+        // Remove leading slash on Windows paths
+        if (pdfPath.startsWith('/') && pdfPath[2] === ':') {
+          pdfPath = pdfPath.substring(1);
+        }
+        docPath = pdfPath;
+        console.log('[Capture] Local PDF path:', pdfPath);
+      }
+    }
     
     // Get clicked element's text content first
     let directText = '';
@@ -242,33 +314,39 @@ async function handleClick(ev) {
       global_x: Math.round((window.screenX || window.screenLeft || 0) + ev.clientX * (window.devicePixelRatio || 1)),
       global_y: Math.round((window.screenY || window.screenTop || 0) + ev.clientY * (window.devicePixelRatio || 1)),
       devicePixelRatio: window.devicePixelRatio || 1,
+      // PDF-specific fields
+      doc_path: docPath,
+      is_pdf: isPdf ? true : undefined,
+      pdf_path: pdfPath,
     };
     console.log('[Capture] Sending click event:', payload);
     
-    // Always send to the extension background which will handle native host or
-    // HTTP fallback. Avoid doing page-origin fetches (these trigger PNA/CORS
-    // errors on HTTPS sites like LinkedIn). The background has host_permissions
-    // for the local backend and will perform the HTTP POST when native fails.
+    // Send data to the Electron app
     try {
-      if (canUseChromeRuntime()) {
-        chrome.runtime.sendMessage(payload, (response) => {
-          if (chrome.runtime.lastError) {
-            console.error('[Capture] Error sending message to background:', chrome.runtime.lastError);
-            return;
-          }
-          console.log('[Capture] Message response from background:', response);
-          if (response && !response.ok) {
-            console.error('[Capture] Background reported error:', response.error);
-          }
-        });
+      const electronData = {
+        ...payload,
+        timestamp: new Date().toISOString(),
+        browser_url: location.href,
+        app_name: 'chrome',
+      };
+
+      // Send to Electron app
+      if (window.electronAPI) {
+        window.electronAPI.sendClickData(electronData);
       } else {
-        // If runtime isn't available (very unusual for extension content scripts),
-        // we avoid doing a direct fetch to the page origin because that can be
-        // blocked by PNA/CORS on some sites. Log and skip.
-        console.warn('[Capture] chrome.runtime not available in content script; skipping HTTP fallback to avoid PNA/CORS issues');
+        // Fallback to WebSocket if available
+        if (typeof WebSocket !== 'undefined') {
+          const ws = new WebSocket('ws://localhost:8000/ws');
+          ws.onopen = () => {
+            ws.send(JSON.stringify(electronData));
+            ws.close();
+          };
+        } else {
+          console.warn('[Capture] No method available to send data to Electron app');
+        }
       }
     } catch (err) {
-      console.error('[Capture] sendMessage threw synchronously:', err);
+      console.error('[Capture] Error sending data to Electron:', err);
     }
   
   } catch (e) {
@@ -298,11 +376,38 @@ function onMouseEvent(ev) {
 // Only listen for mousedown to get the most accurate click position
 window.addEventListener('mousedown', onMouseEvent, { capture: true });
 
+// Special handling for Chrome's PDF viewer
+if (location.href.toLowerCase().includes('.pdf')) {
+  console.log('[Capture] PDF URL detected, adding specific handlers');
+  
+  // Force content script injection into PDF view
+  if (document.contentType === 'application/pdf') {
+    console.log('[Capture] PDF content type detected');
+    
+    // Ensure we catch clicks in the PDF viewer
+    window.addEventListener('click', (ev) => {
+      console.log('[Capture] PDF click event:', ev);
+      onMouseEvent(ev);
+    }, { capture: true });
+    
+    // Also listen for text selection changes
+    document.addEventListener('selectionchange', () => {
+      console.log('[Capture] PDF selection changed');
+      const selection = window.getSelection();
+      if (selection) {
+        console.log('[Capture] Selected text:', selection.toString());
+      }
+    });
+  }
+}
+
 // Handle PDF embeds specially
 function installPdfListeners() {
-  const pdfElements = document.querySelectorAll('embed[type="application/pdf"], object[type="application/pdf"]');
+  console.log('[Capture] Installing PDF embed listeners');
+  const pdfElements = document.querySelectorAll('embed[type="application/pdf"], object[type="application/pdf"], #plugin, #viewer, .pdfViewer');
   pdfElements.forEach(el => {
     try {
+      console.log('[Capture] Adding listener to PDF element:', el.tagName, el.id, el.className);
       el.addEventListener('mousedown', onMouseEvent, { capture: true });
     } catch (err) {
       console.warn('[Capture] Could not attach to PDF viewer:', err);
@@ -313,5 +418,6 @@ function installPdfListeners() {
 // Install PDF handlers now and after a delay for dynamic embeds
 installPdfListeners();
 setTimeout(installPdfListeners, 1000);
+setTimeout(installPdfListeners, 2000); // Try again later for slow-loading PDFs
 
 

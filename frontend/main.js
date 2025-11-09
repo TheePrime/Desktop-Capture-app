@@ -1,16 +1,39 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, screen } = require('electron');
 const path = require('path');
+const fs = require('fs').promises;
+const WebSocket = require('ws');
 
-// Use global fetch if available, otherwise try to fall back to node-fetch
-let fetchImpl = globalThis.fetch || undefined;
-if (!fetchImpl) {
-  try {
-    const nf = require('node-fetch');
-    fetchImpl = nf.default || nf;
-  } catch (e) {
-    // leave undefined; handlers will surface errors to the UI
-    fetchImpl = undefined;
-  }
+let mainWindow = null;
+let isTracking = false;
+let trackingInterval = null;
+let currentHz = 1;
+let wsServer = null;
+
+// Screenshot capture settings
+const SCREENSHOT_QUALITY = 0.8;
+
+// Create WebSocket server for extension communication
+function setupWebSocketServer() {
+    wsServer = new WebSocket.Server({ port: 8000 });
+    
+    wsServer.on('connection', (ws) => {
+        console.log('Extension connected');
+        
+        ws.on('message', async (message) => {
+            try {
+                const data = JSON.parse(message);
+                if (mainWindow && isTracking) {
+                    const screenshot = await captureScreenshot();
+                    mainWindow.webContents.send('click-captured', {
+                        ...data,
+                        screenshot
+                    });
+                }
+            } catch (err) {
+                console.error('Error handling WebSocket message:', err);
+            }
+        });
+    });
 }
 
 const BACKEND = 'http://127.0.0.1:8000';
@@ -33,89 +56,127 @@ async function notifyBackendStatus(active) {
   }
 }
 
+// Capture screenshot of all displays
+async function captureScreenshot() {
+  try {
+    const displays = screen.getAllDisplays();
+    const sources = await desktopCapturer.getSources({ 
+      types: ['screen'],
+      thumbnailSize: {
+        width: 1920,
+        height: 1080
+      }
+    });
+
+    // Combine all screenshots into one base64 string
+    const screenshots = sources.map(source => {
+      return source.thumbnail.toDataURL();
+    });
+
+    return screenshots[0]; // For now just return the primary display
+  } catch (err) {
+    console.error('Screenshot capture failed:', err);
+    return null;
+  }
+}
+
+// Create main application window
 async function createWindow() {
-  const win = new BrowserWindow({
-    width: 800,
-    height: 540,
+  mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
     webPreferences: {
-      preload: undefined,
       nodeIntegration: true,
       contextIsolation: false,
     },
   });
 
-  win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   
-  // Notify backend when window is ready
-  await notifyBackendStatus(true);
+  // Register all IPC handlers
+  ipcMain.handle('tracking:status', () => {
+    return {
+      isTracking,
+      hz: currentHz
+    };
+  });
+
+  ipcMain.handle('tracking:start', () => {
+    isTracking = true;
+    return { success: true };
+  });
+
+  ipcMain.handle('tracking:stop', () => {
+    isTracking = false;
+    return { success: true };
+  });
+
+  ipcMain.handle('tracking:setHz', (_event, hz) => {
+    currentHz = parseFloat(hz);
+    return { success: true };
+  });
+
+  ipcMain.handle('take-screenshot', async () => {
+    return await captureScreenshot();
+  });
 }
 
 app.whenReady().then(() => {
+  setupWebSocketServer();
   createWindow();
+  
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
 app.on('window-all-closed', async () => {
-  // Notify backend we're shutting down
-  await notifyBackendStatus(false);
+  if (wsServer) {
+    wsServer.close();
+  }
   if (process.platform !== 'darwin') app.quit();
 });
 
-ipcMain.handle('backend:status', async () => {
-  try {
-    if (!fetchImpl) throw new Error('fetch not available in main process');
-    const res = await fetchImpl(`${BACKEND}/status`);
-    return await res.json();
-  } catch (e) {
-    return { error: String(e) };
-  }
+// Take screenshot on demand
+ipcMain.handle('take-screenshot', async () => {
+  return await captureScreenshot();
 });
 
-ipcMain.handle('backend:start', async () => {
-  try {
-    if (!fetchImpl) throw new Error('fetch not available in main process');
-    const res = await fetchImpl(`${BACKEND}/start`, { method: 'POST' });
-    return await res.json();
-  } catch (e) {
-    return { error: String(e) };
-  }
-});
-
-ipcMain.handle('backend:stop', async () => {
-  try {
-    if (!fetchImpl) throw new Error('fetch not available in main process');
-    const res = await fetchImpl(`${BACKEND}/stop`, { method: 'POST' });
-    return await res.json();
-  } catch (e) {
-    return { error: String(e) };
-  }
-});
-
-ipcMain.handle('backend:setHz', async (_evt, hz) => {
-  try {
-    if (!fetchImpl) throw new Error('fetch not available in main process');
-    const res = await fetchImpl(`${BACKEND}/config`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ hz }),
+// Handle click data from extension
+ipcMain.on('click-data', async (event, clickData) => {
+  if (mainWindow && isTracking) {
+    const screenshot = await captureScreenshot();
+    mainWindow.webContents.send('click-captured', {
+      ...clickData,
+      screenshot
     });
-    return await res.json();
-  } catch (e) {
-    return { error: String(e) };
   }
 });
 
-// New: endpoint to check for recent screenshots
-ipcMain.handle('backend:recentScreenshots', async (_evt, seconds = 1.0) => {
-  try {
-    if (!fetchImpl) throw new Error('fetch not available in main process');
-    const res = await fetchImpl(`${BACKEND}/recent_screenshots?seconds=${seconds}`);
-    return await res.json();
-  } catch (e) {
-    return { error: String(e) };
-  }
+// Status check
+ipcMain.handle('tracking:status', () => {
+  return {
+    isTracking,
+    hz: currentHz
+  };
+});
+
+// Start tracking
+ipcMain.handle('tracking:start', () => {
+  isTracking = true;
+  return { success: true };
+});
+
+// Stop tracking
+ipcMain.handle('tracking:stop', () => {
+  isTracking = false;
+  return { success: true };
+});
+
+// Update capture rate
+ipcMain.handle('tracking:setHz', (_event, hz) => {
+  currentHz = parseFloat(hz);
+  return { success: true };
 });
 
 

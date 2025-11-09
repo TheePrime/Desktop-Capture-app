@@ -28,12 +28,37 @@ def ensure_log_dir() -> None:
 
 
 def read_message():
-    raw_length = sys.stdin.buffer.read(4)
-    if not raw_length:
-        sys.exit(0)
-    message_length = struct.unpack("I", raw_length)[0]
-    message = sys.stdin.buffer.read(message_length).decode("utf-8")
-    return json.loads(message)
+    try:
+        # Read the message length (first 4 bytes)
+        raw_length = sys.stdin.buffer.read(4)
+        if not raw_length:
+            logger.warning("Native host: stdin closed, exiting gracefully")
+            sys.exit(0)
+            
+        # Unpack message length as unsigned int
+        try:
+            message_length = struct.unpack("I", raw_length)[0]
+        except struct.error as e:
+            logger.error(f"Failed to unpack message length: {e}")
+            return None
+            
+        # Read the message content
+        try:
+            message = sys.stdin.buffer.read(message_length).decode("utf-8")
+        except (IOError, UnicodeDecodeError) as e:
+            logger.error(f"Failed to read message content: {e}")
+            return None
+            
+        # Parse JSON
+        try:
+            return json.loads(message)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse message JSON: {e}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Unexpected error in read_message: {e}", exc_info=True)
+        return None
 
 
 def send_message(message):
@@ -77,16 +102,37 @@ def write_log(data):
                 continue
     except Exception as e:
         logger.warning(f"Failed to get Chrome process info: {e}")
+    # Handle PDF paths first
+    doc_path = None
+    if data.get("is_pdf"):
+        # Check explicit PDF path from extension
+        if data.get("pdf_path"):
+            doc_path = os.path.abspath(data["pdf_path"])
+            logger.info(f"Using explicit PDF path: {doc_path}")
+        # Try file:// URL parsing
+        elif url and isinstance(url, str) and url.startswith("file://"):
+            try:
+                parsed = urlparse(url)
+                path = unquote(parsed.path or "")
+                # Clean Windows paths
+                if os.name == "nt" and path.startswith("/") and len(path) > 2 and path[2] == ":":
+                    path = path.lstrip("/")
+                doc_path = os.path.abspath(path)
+                logger.info(f"Extracted PDF path from URL: {doc_path}")
+            except Exception as e:
+                logger.warning(f"Failed to parse PDF URL: {e}")
+
     record = {
         "timestamp_utc": ts,
         "x": data.get("x"),
         "y": data.get("y"),
-        "app_name": "chrome",
+        "app_name": "chrome_pdf" if data.get("is_pdf") else "chrome",
         "process_id": process_id,  # Use the process_id we found above
         "window_title": data.get("title"),
         "display_id": None,  # Will be set below
         "source": data.get("source", "ext"),
-        "url_or_path": url,
+        "url_or_path": doc_path if doc_path else url,
+        "doc_path": doc_path,
         "text": text,
         "screenshot_path": None,
     }
@@ -217,10 +263,43 @@ def write_log(data):
 
 def main():
     ensure_log_dir()
+    logger.info("Native host starting up")
+    error_count = 0
+    max_errors = 5  # Allow up to 5 errors before exiting
+    
     while True:
-        message = read_message()
-        write_log(message)
-        send_message({"status": "ok"})
+        try:
+            # Read the next message
+            message = read_message()
+            if message is None:
+                error_count += 1
+                logger.warning(f"Failed to read message (error {error_count} of {max_errors})")
+                if error_count >= max_errors:
+                    logger.error("Too many errors, exiting")
+                    sys.exit(1)
+                continue
+                
+            # Reset error count on successful message
+            error_count = 0
+            
+            # Process the message
+            try:
+                write_log(message)
+                send_message({"status": "ok"})
+            except Exception as e:
+                logger.error(f"Error processing message: {e}", exc_info=True)
+                try:
+                    # Try to notify extension of the error
+                    send_message({"status": "error", "error": str(e)})
+                except Exception:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"Unexpected error in main loop: {e}", exc_info=True)
+            error_count += 1
+            if error_count >= max_errors:
+                logger.error("Too many errors, exiting")
+                sys.exit(1)
 
 
 if __name__ == "__main__":

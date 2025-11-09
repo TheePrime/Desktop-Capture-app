@@ -5,28 +5,85 @@ let nativePort = null;
 let reconnecting = false
 
 
+let connectionAttempts = 0;
+const MAX_RETRIES = 5;
+const RETRY_DELAYS = [2000, 4000, 8000, 16000, 32000]; // Exponential backoff
+
+function getRetryDelay() {
+  const index = Math.min(connectionAttempts, RETRY_DELAYS.length - 1);
+  return RETRY_DELAYS[index];
+}
+
 function connectNativeHost() {
   if (reconnecting) return;
+  
+  // Check if we've hit the retry limit
+  if (connectionAttempts >= MAX_RETRIES) {
+    console.error('[NativeHost] Maximum connection attempts reached. Please check if native_host.py is running.');
+    return;
+  }
+  
   reconnecting = true;
   try {
     nativePort = chrome.runtime.connectNative(HOST_NAME);
     console.log('[NativeHost] Connected to native host');
+    
+    // Reset connection attempts on successful connection
+    connectionAttempts = 0;
+    
     nativePort.onMessage.addListener((msg) => {
       console.log('[NativeHost] Received from Python:', msg);
+      // Check for error status
+      if (msg.status === 'error') {
+        console.error('[NativeHost] Error from native host:', msg.error);
+      }
     });
+    
     nativePort.onDisconnect.addListener(() => {
-      console.log('[NativeHost] Disconnected from native host');
+      const error = chrome.runtime.lastError;
+      console.log('[NativeHost] Disconnected from native host:', error?.message);
       nativePort = null;
-      setTimeout(
-        connectNativeHost,2000); // auto-retry
+      reconnecting = false;
+      
+      // Increment attempts and schedule retry
+      connectionAttempts++;
+      if (connectionAttempts < MAX_RETRIES) {
+        const delay = getRetryDelay();
+        console.log(`[NativeHost] Retrying connection in ${delay}ms (attempt ${connectionAttempts} of ${MAX_RETRIES})`);
+        setTimeout(connectNativeHost, delay);
+      } else {
+        console.error('[NativeHost] Maximum retries reached. Please restart the native host.');
+      }
     });
   } catch (err) {
     console.error('[NativeHost] Connection error:', err);
     nativePort = null;
-    setTimeout(connectNativeHost, 3000);
+    reconnecting = false;
+    
+    // Schedule retry with backoff
+    connectionAttempts++;
+    if (connectionAttempts < MAX_RETRIES) {
+      const delay = getRetryDelay();
+      console.log(`[NativeHost] Retrying connection in ${delay}ms (attempt ${connectionAttempts} of ${MAX_RETRIES})`);
+      setTimeout(connectNativeHost, delay);
+    }
   }
 }
 
+
+// Handle PDF document loading
+chrome.webNavigation.onCompleted.addListener((details) => {
+  if (details.url.toLowerCase().endsWith('.pdf')) {
+    console.log('[Capture] PDF navigation completed:', details.url);
+    // Inject content script into PDF viewer
+    chrome.scripting.executeScript({
+      target: { tabId: details.tabId },
+      files: ['content.js']
+    }).catch(err => console.error('[Capture] PDF script injection failed:', err));
+  }
+}, {
+  url: [{ pathSuffix: '.pdf' }, { urlContains: '.pdf' }]
+});
 
 // Always reconnect when the service worker wakes up
 chrome.runtime.onStartup.addListener(connectNativeHost);
@@ -37,27 +94,28 @@ connectNativeHost();
 
 async function sendToBackend(payload) {
   try {
-    // First check if Electron app is active
-    const statusRes = await fetch(`${BACKEND}/status`);
-    let electronActive = false;
-    if (statusRes.ok) {
-      const status = await statusRes.json();
-      electronActive = status.electron_active;
-    }
+    console.log('[Capture] Sending to Electron app...');
+    const electronData = {
+      ...payload,
+      timestamp: new Date().toISOString(),
+      app_name: 'chrome',
+    };
 
-    // Only check for screenshots if Electron is active
-    if (electronActive) {
-      console.log('[Capture] Checking for recent screenshots...');
-      const screenshotRes = await fetch(`${BACKEND}/recent_screenshots?seconds=0.5`);
-      if (screenshotRes.ok) {
-        const { screenshots = [] } = await screenshotRes.json();
-        if (screenshots.length > 0) {
-          payload.screenshot_path = screenshots[screenshots.length - 1];
-          console.log('[Capture] Found recent screenshot:', payload.screenshot_path);
-        }
-      }
-    } else {
-      console.log('[Capture] Skipping screenshots - Electron app not active');
+    // Try WebSocket first
+    try {
+      const ws = new WebSocket('ws://localhost:8000/ws');
+      await new Promise((resolve, reject) => {
+        ws.onopen = () => {
+          ws.send(JSON.stringify(electronData));
+          ws.close();
+          resolve();
+        };
+        ws.onerror = reject;
+        setTimeout(reject, 1000); // 1s timeout
+      });
+      return { ok: true };
+    } catch (e) {
+      console.warn('[Capture] WebSocket failed, trying HTTP...');
     }
 
     console.log('[Capture] Sending to backend:', payload);
@@ -84,14 +142,25 @@ function sendToNativeHost(payload) {
   return new Promise((resolve) => {
     try {
       if (!nativePort) {
-        console.warn('[Capture] No native port, reconnecting...');
-        connectNativeHost();
-      }
-      if (!nativePort) {
+        console.warn('[Capture] No native port available');
+        // Only try to reconnect if we haven't hit the retry limit
+        if (connectionAttempts < MAX_RETRIES) {
+          console.log('[Capture] Attempting to reconnect...');
+          connectNativeHost();
+        }
+        // Fall back to HTTP immediately rather than waiting
         resolve({ ok: false, error: 'no native port' });
         return;
       }
+      
       console.log('[Capture] Payload before native send:', payload);
+      
+      // Add timeout for native messaging
+      const timeoutId = setTimeout(() => {
+        console.warn('[Capture] Native messaging timeout');
+        cleanup();
+        resolve({ ok: false, error: 'timeout' });
+      }, 5000); // 5 second timeout
       const onMessage = (msg) => {
         console.log('[Capture] Native response:', msg);
         cleanup();

@@ -13,12 +13,25 @@ function canUseChromeRuntime() {
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function expandSeeMore(root) {
+  // Broader set of expansion triggers for LinkedIn and X
   const selectors = [
+    // LinkedIn standard
     'button[aria-label="See more"]',
     'span[role="button"][aria-expanded="false"]',
+    // LinkedIn variations
+    '[aria-expanded="false"]',
+    'button.see-more-less-button',
+    'button.inline-show-more-text',
+    // X/Twitter
     'div[data-testid="expand"]',
-    'div[aria-label="Show more"]'
+    'div[aria-label="Show more"]',
+    '[data-testid="tweet-text-show-more-link"]',
+    // Common patterns
+    'button.show-more',
+    '.show-more-button',
   ];
+
+  // First pass: standard buttons
   for (const sel of selectors) {
     let btns;
     try {
@@ -28,33 +41,89 @@ async function expandSeeMore(root) {
       continue;
     }
     for (const b of btns) {
-      try { b.click(); } catch {}
+      try { 
+        b.click();
+        // Small delay between clicks to let UI update
+        await sleep(50);
+      } catch (e) {
+        console.warn('[Capture] Click failed:', e);
+      }
     }
   }
 
-  // Manually click text-based "See more" buttons (querySelector can't match by text)
-  const textButtons = Array.from(root.querySelectorAll('span[role="button"], button'))
-    .filter((el) => (el.innerText || '').trim().toLowerCase() === 'see more');
-  for (const btn of textButtons) {
-    try { btn.click(); } catch {}
+  // Second pass: text-based buttons
+  const expandTexts = ['see more', 'show more', 'expand', 'read more'];
+  const buttonEls = Array.from(root.querySelectorAll('span[role="button"], button, a[role="button"]'));
+  for (const btn of buttonEls) {
+    try {
+      const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
+      if (expandTexts.some(t => text.includes(t))) {
+        btn.click();
+        await sleep(50);
+      }
+    } catch (e) {
+      console.warn('[Capture] Text-based click failed:', e);
+    }
   }
 
-  await sleep(150);
+  // Wait for expansions to complete
+  await sleep(250);
 }
 
 function nearestPostContainer(el) {
-  const containers = [
-    'article', // common container
-    'div[data-testid="tweet"]',
-    'div.feed-shared-update-v2',
-  ];
+  const containers = {
+    // LinkedIn selectors
+    'div.feed-shared-update-v2': true,
+    'div.feed-shared-mini-update-v2': true,
+    'div.occludable-update': true,
+    'div[data-urn]': true,
+    'article.feed-shared-update': true,
+    // X/Twitter selectors
+    'div[data-testid="tweet"]': true,
+    'article[data-testid="tweet"]': true,
+    'article[role="article"]': true,
+    // Fallbacks (with validation)
+    'article': (el) => {
+      // Validate it's actually a post container
+      return el.querySelector('[data-urn], [data-testid="tweet"], [aria-label*="post"], [aria-label*="Tweet"]') !== null;
+    }
+  };
+  
   let cur = el;
   while (cur && cur !== document.body) {
-    for (const c of containers) {
-      if (cur.matches && cur.matches(c)) return cur;
+    if (!cur.matches) continue;
+    for (const [selector, validator] of Object.entries(containers)) {
+      if (cur.matches(selector)) {
+        if (typeof validator === 'function') {
+          if (validator(cur)) return cur;
+        } else {
+          return cur;
+        }
+      }
     }
     cur = cur.parentElement;
   }
+  
+  // If we didn't find a post container, try a broader search within
+  // a reasonable ancestor to handle embedded/quote posts
+  cur = el;
+  let searchRoot = el;
+  for (let i = 0; i < 4 && cur && cur !== document.body; i++) {
+    searchRoot = cur;
+    cur = cur.parentElement;
+  }
+  
+  for (const [selector, validator] of Object.entries(containers)) {
+    const candidates = Array.from(searchRoot.querySelectorAll(selector));
+    for (const candidate of candidates) {
+      if (typeof validator === 'function') {
+        if (validator(candidate)) return candidate;
+      } else {
+        return candidate;
+      }
+    }
+  }
+  
   return document.body;
 }
 

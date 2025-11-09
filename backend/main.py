@@ -365,7 +365,16 @@ def create_app() -> FastAPI:
 
 if __name__ == "__main__":
     import uvicorn
-
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=False)
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Desktop capture application")
+    parser.add_argument("--hz", type=float, default=1.0,
+                       help="Screenshot capture rate in Hz (default: 1.0)")
+    args = parser.parse_args()
+    
+    # Configure app state
+    state.config.hz = args.hz
+    
+    uvicorn.run(app, host="127.0.0.1", port=8000)
 
 

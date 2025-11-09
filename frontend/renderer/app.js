@@ -109,10 +109,15 @@ function showEntryDetails(entry) {
 
     // Show screenshot if available
     if (entry.screenshot) {
+        const container = document.createElement('div');
+        container.className = 'preview-image-container';
+        
         const img = document.createElement('img');
         img.src = entry.screenshot;
         img.className = 'preview-image';
-        previewContent.appendChild(img);
+        
+        container.appendChild(img);
+        previewContent.appendChild(container);
     }
 
     // Show details grid

@@ -483,12 +483,17 @@
         justify-content: center;
         background: #f1f5f9;
         min-height: 0;
-        max-height: calc(100vh - 400px);
+        position: relative;
+        height: calc(100vh - 400px);
       }
 
       .preview-placeholder {
         text-align: center;
         color: var(--muted);
+      }
+
+      .preview-content:has(.preview-image) {
+        padding: 0;
       }
 
       .placeholder-icon {
@@ -505,11 +510,18 @@
       }
 
       .preview-image {
-        max-width: 100%;
-        max-height: calc(100vh - 200px);
+        width: 100%;
+        height: 100%;
         object-fit: contain;
-        border: 1px solid var(--border);
-        border-radius: 0.5rem;
+        background: white;
+        display: block;
+      }
+
+      .preview-image-container {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        overflow: auto;
         background: white;
       }
 

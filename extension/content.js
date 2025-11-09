@@ -71,36 +71,32 @@ async function expandSeeMore(root) {
       }
     }
   }
-
-  // Second pass: text-based buttons
-  const expandTexts = ['see more', 'show more', 'expand', 'read more'];
-    let sent = false;
-    // Prefer persistent port when available
-    if (capturePort) {
+  // Second pass: look for inline 'see more'/'show more' links or buttons by text
+  const expandTexts = ['see more', 'show more', 'expand', 'read more', 'more'];
+  try {
+    const candidates = Array.from(root.querySelectorAll('button, a, span'));
+    for (const el of candidates) {
       try {
-        capturePort.postMessage(payload);
-        sent = true;
+        const txt = (el.innerText || el.textContent || '').trim().toLowerCase();
+        if (!txt) continue;
+        for (const needle of expandTexts) {
+          if (txt.includes(needle)) {
+            try {
+              el.click();
+              await sleep(60);
+            } catch (e) {
+              // ignore individual click failures
+            }
+            break;
+          }
+        }
       } catch (e) {
-        console.warn('[Capture] Port postMessage failed, falling back to sendMessage:', e);
+        continue;
       }
     }
-    if (!sent) {
-      try {
-        chrome.runtime.sendMessage(payload, (response) => {
-          if (chrome.runtime.lastError) {
-            console.warn('[Capture] sendMessage error:', chrome.runtime.lastError.message);
-            return;
-          }
-          if (response && response.ok) {
-            console.log('[Capture] Payload queued');
-          } else {
-            console.warn('[Capture] Background did not confirm processing');
-          }
-        });
-      } catch (err) {
-        console.error('[Capture] Error sending message to background:', err);
-      }
-    }
+  } catch (e) {
+    // ignore expand errors
+  }
 }
 
 function nearestPostContainer(el) {

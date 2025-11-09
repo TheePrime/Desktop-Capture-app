@@ -129,8 +129,18 @@ function showEntryDetails(entry) {
 // Handle incoming click data from extension
 ipcRenderer.on('click-captured', async (event, clickInfo) => {
     try {
-        // Take a screenshot when click is captured
-        const screenshot = await ipcRenderer.invoke('take-screenshot');
+        let screenshot = null;
+        if (clickInfo && clickInfo.screenshot) {
+            screenshot = clickInfo.screenshot;
+        } else if (clickInfo && clickInfo.screenshot_path) {
+            // Convert a local path to a file URL; normalize Windows backslashes
+            const p = clickInfo.screenshot_path;
+            const fileUrl = p.startsWith('file://') ? p : 'file://' + p.replace(/\\/g, '/');
+            screenshot = fileUrl;
+        } else {
+            // Fallback: take a live screenshot via Electron
+            screenshot = await ipcRenderer.invoke('take-screenshot');
+        }
         await addClickEntry(clickInfo, screenshot);
     } catch (err) {
         console.error('Failed to process click:', err);

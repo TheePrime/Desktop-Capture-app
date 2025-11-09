@@ -10,6 +10,27 @@ function canUseChromeRuntime() {
   }
 }
 
+// Persistent port to reduce 'Extension context invalidated' errors
+let capturePort = null;
+function connectCapturePort() {
+  if (!canUseChromeRuntime()) return;
+  try {
+    capturePort = chrome.runtime.connect({ name: 'capture' });
+    console.log('[Capture] Connected persistent port');
+    capturePort.onDisconnect.addListener(() => {
+      console.warn('[Capture] Persistent port disconnected');
+      capturePort = null;
+      // Try to reconnect after a short delay
+      setTimeout(() => {
+        try { connectCapturePort(); } catch {}
+      }, 1000);
+    });
+  } catch (err) {
+    console.warn('[Capture] Failed to open persistent port:', err);
+  }
+}
+connectCapturePort();
+
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function expandSeeMore(root) {
@@ -53,21 +74,33 @@ async function expandSeeMore(root) {
 
   // Second pass: text-based buttons
   const expandTexts = ['see more', 'show more', 'expand', 'read more'];
-  const buttonEls = Array.from(root.querySelectorAll('span[role="button"], button, a[role="button"]'));
-  for (const btn of buttonEls) {
-    try {
-      const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
-      if (expandTexts.some(t => text.includes(t))) {
-        btn.click();
-        await sleep(50);
+    let sent = false;
+    // Prefer persistent port when available
+    if (capturePort) {
+      try {
+        capturePort.postMessage(payload);
+        sent = true;
+      } catch (e) {
+        console.warn('[Capture] Port postMessage failed, falling back to sendMessage:', e);
       }
-    } catch (e) {
-      console.warn('[Capture] Text-based click failed:', e);
     }
-  }
-
-  // Wait for expansions to complete
-  await sleep(250);
+    if (!sent) {
+      try {
+        chrome.runtime.sendMessage(payload, (response) => {
+          if (chrome.runtime.lastError) {
+            console.warn('[Capture] sendMessage error:', chrome.runtime.lastError.message);
+            return;
+          }
+          if (response && response.ok) {
+            console.log('[Capture] Payload queued');
+          } else {
+            console.warn('[Capture] Background did not confirm processing');
+          }
+        });
+      } catch (err) {
+        console.error('[Capture] Error sending message to background:', err);
+      }
+    }
 }
 
 function nearestPostContainer(el) {

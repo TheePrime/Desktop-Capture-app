@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, desktopCapturer, screen } = require('electron');
 const path = require('path');
-const fs = require('fs').promises;
+const fsPromises = require('fs').promises;
+const fs = require('fs');
 const WebSocket = require('ws');
 
 let mainWindow = null;
@@ -8,6 +9,9 @@ let isTracking = false;
 let trackingInterval = null;
 let currentHz = 1;
 let wsServer = null;
+let logWatcher = null;
+let watchedFile = null;
+let prevLen = 0;
 
 // Screenshot capture settings
 const SCREENSHOT_QUALITY = 0.8;
@@ -93,32 +97,24 @@ async function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   
-  // Register all IPC handlers
-  ipcMain.handle('tracking:status', () => {
-    return {
-      isTracking,
-      hz: currentHz
-    };
-  });
+  // Register all IPC handlers (only once in app lifecycle)
+  registerIpcHandlersOnce();
 
-  ipcMain.handle('tracking:start', () => {
-    isTracking = true;
-    return { success: true };
-  });
+  // Start watching backend logs once window is ready to receive events
+  startLogWatcher().catch(err => console.error('[Electron] Log watcher failed to start:', err));
+}
 
-  ipcMain.handle('tracking:stop', () => {
-    isTracking = false;
-    return { success: true };
-  });
+// Ensure we only register handlers once
+let ipcHandlersRegistered = false;
+function registerIpcHandlersOnce() {
+  if (ipcHandlersRegistered) return;
+  ipcHandlersRegistered = true;
 
-  ipcMain.handle('tracking:setHz', (_event, hz) => {
-    currentHz = parseFloat(hz);
-    return { success: true };
-  });
-
-  ipcMain.handle('take-screenshot', async () => {
-    return await captureScreenshot();
-  });
+  ipcMain.handle('tracking:status', () => ({ isTracking, hz: currentHz }));
+  ipcMain.handle('tracking:start', () => { isTracking = true; return { success: true }; });
+  ipcMain.handle('tracking:stop', () => { isTracking = false; return { success: true }; });
+  ipcMain.handle('tracking:setHz', (_event, hz) => { currentHz = parseFloat(hz); return { success: true }; });
+  ipcMain.handle('take-screenshot', async () => await captureScreenshot());
 }
 
 app.whenReady().then(() => {
@@ -134,49 +130,67 @@ app.on('window-all-closed', async () => {
   if (wsServer) {
     wsServer.close();
   }
+  if (logWatcher) {
+    try { logWatcher.close(); } catch {}
+  }
   if (process.platform !== 'darwin') app.quit();
 });
 
-// Take screenshot on demand
-ipcMain.handle('take-screenshot', async () => {
-  return await captureScreenshot();
-});
+// Remove duplicate global registrations; events will be wired via registerIpcHandlersOnce()
 
-// Handle click data from extension
-ipcMain.on('click-data', async (event, clickData) => {
-  if (mainWindow && isTracking) {
-    const screenshot = await captureScreenshot();
-    mainWindow.webContents.send('click-captured', {
-      ...clickData,
-      screenshot
-    });
+function getTodayFolder() {
+  const now = new Date();
+  const yyyy = now.getUTCFullYear();
+  const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(now.getUTCDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+async function ensureFile(filePath) {
+  try {
+    await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
+    await fsPromises.appendFile(filePath, '');
+  } catch {}
+}
+
+async function startLogWatcher() {
+  // Determine clicks.ndjson path for today
+  const dataRoot = path.resolve(__dirname, '..', 'data');
+  const dayFolder = getTodayFolder();
+  const filePath = path.join(dataRoot, dayFolder, 'clicks.ndjson');
+  watchedFile = filePath;
+
+  await ensureFile(filePath);
+  try {
+    const content = await fsPromises.readFile(filePath, 'utf8');
+    prevLen = content.length; // don't emit existing lines on startup
+  } catch {
+    prevLen = 0;
   }
-});
 
-// Status check
-ipcMain.handle('tracking:status', () => {
-  return {
-    isTracking,
-    hz: currentHz
-  };
-});
-
-// Start tracking
-ipcMain.handle('tracking:start', () => {
-  isTracking = true;
-  return { success: true };
-});
-
-// Stop tracking
-ipcMain.handle('tracking:stop', () => {
-  isTracking = false;
-  return { success: true };
-});
-
-// Update capture rate
-ipcMain.handle('tracking:setHz', (_event, hz) => {
-  currentHz = parseFloat(hz);
-  return { success: true };
-});
+  // Watch the file for appends
+  logWatcher = fs.watch(filePath, { persistent: true }, async (eventType) => {
+    if (eventType !== 'change') return;
+    try {
+      const content = await fsPromises.readFile(filePath, 'utf8');
+      if (content.length <= prevLen) return;
+      const delta = content.slice(prevLen);
+      prevLen = content.length;
+      const lines = delta.split(/\r?\n/).filter(l => l.trim().length > 0);
+      for (const line of lines) {
+        try {
+          const rec = JSON.parse(line);
+          if (mainWindow) {
+            mainWindow.webContents.send('click-captured', rec);
+          }
+        } catch (e) {
+          console.warn('[Electron] Failed to parse NDJSON line:', e);
+        }
+      }
+    } catch (e) {
+      console.error('[Electron] Error reading log file:', e);
+    }
+  });
+}
 
 

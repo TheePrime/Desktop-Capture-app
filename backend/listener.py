@@ -36,23 +36,16 @@ def _get_active_window_title() -> Optional[str]:
 
 def _get_active_process_info() -> tuple[Optional[str], Optional[int]]:
     try:
-        # Platform-specific fast path for Windows using win32 APIs
-        if os.name == "nt":
+        # Simple approach: look for Chrome directly
+        for proc in psutil.process_iter(['pid', 'name']):
             try:
-                import win32gui
-                import win32process
-
-                hwnd = win32gui.GetForegroundWindow()
-                if hwnd:
-                    _, pid = win32process.GetWindowThreadProcessId(hwnd)
-                    try:
-                        p = psutil.Process(pid)
-                        return p.name(), pid
-                    except Exception:
-                        return None, pid
+                if 'chrome' in proc.info['name'].lower():
+                    return proc.info['name'], proc.info['pid']
             except Exception:
-                # If pywin32 isn't available, fall back to generic method below
-                pass
+                continue
+        return None, None
+    except Exception:
+        return None, None
 
         # Generic fallback: try to guess process by active window title
         win = pygetwindow.getActiveWindow()
@@ -136,20 +129,27 @@ def _find_file_in_common_places(filename: str) -> Optional[str]:
 
 
 def _get_display_id_for_point(x: int, y: int) -> int:
-    # Use the same monitor mapping as capture.py (mss.monitors)
+    """Simple display mapping - uses mss to get monitor info."""
     try:
         with mss.mss() as sct:
-            monitors = sct.monitors
-            # monitors[0] is virtual screen; real monitors start at 1
-            for idx in range(1, len(monitors)):
-                mon = monitors[idx]
-                if mon["left"] <= x < mon["left"] + mon["width"] and mon["top"] <= y < mon["top"] + mon["height"]:
+            # Get list of monitors (skip first which is the virtual screen)
+            real_monitors = sct.monitors[1:]
+            # Log monitor layout for debugging
+            for idx, mon in enumerate(real_monitors, 1):
+                logger.info(f"Monitor {idx}: left={mon['left']}, top={mon['top']}, width={mon['width']}, height={mon['height']}")
+            
+            # Find which monitor contains the point
+            for idx, mon in enumerate(real_monitors, 1):
+                if (mon['left'] <= x < mon['left'] + mon['width'] and 
+                    mon['top'] <= y < mon['top'] + mon['height']):
+                    logger.info(f"Point ({x},{y}) matched to monitor {idx}")
                     return idx
-            # Fallback to primary monitor (1)
+            
+            logger.info(f"Point ({x},{y}) outside all monitors, using primary (1)")
             return 1
-    except Exception:
-        # Best-effort fallback
-        return 0
+    except Exception as e:
+        logger.error(f"Error mapping display: {e}")
+        return 1
 
 
 def find_pid_for_window_title(title: Optional[str]) -> tuple[Optional[str], Optional[int]]:

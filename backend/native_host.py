@@ -48,6 +48,12 @@ def write_log(data):
     ts = datetime.datetime.utcnow().isoformat() + "Z"
     text = data.get("text")
     url = data.get("browser_url") or data.get("url")
+    
+    # Log the incoming data for debugging
+    try:
+        logger.info(f"Received data: {json.dumps(data)}")
+    except Exception:
+        logger.warning("Could not log incoming data")
     record = {
         "timestamp_utc": ts,
         "x": data.get("x"),

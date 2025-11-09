@@ -71,23 +71,44 @@ async function expandSeeMore(root) {
 }
 
 function nearestPostContainer(el) {
-  const containers = {
-    // LinkedIn selectors
-    'div.feed-shared-update-v2': true,
-    'div.feed-shared-mini-update-v2': true,
-    'div.occludable-update': true,
-    'div[data-urn]': true,
-    'article.feed-shared-update': true,
-    // X/Twitter selectors
-    'div[data-testid="tweet"]': true,
-    'article[data-testid="tweet"]': true,
-    'article[role="article"]': true,
-    // Fallbacks (with validation)
-    'article': (el) => {
-      // Validate it's actually a post container
-      return el.querySelector('[data-urn], [data-testid="tweet"], [aria-label*="post"], [aria-label*="Tweet"]') !== null;
+  // Simplified selector list - get any container that might have content
+  const selectors = [
+    // LinkedIn post containers
+    '.feed-shared-update-v2',
+    '.feed-shared-mini-update-v2',
+    '.occludable-update',
+    '[data-urn]',
+    // X/Twitter containers  
+    '[data-testid="tweet"]',
+    '[role="article"]',
+    // Generic content
+    'article',
+    '.post',
+    // Fallback to closest major container
+    '.feed-shared-update-v2__description',
+    '.feed-shared-text',
+    '.update-components-text'
+  ];
+
+  // Walk up the tree looking for containers
+  let current = el;
+  while (current && current !== document.body) {
+    for (const selector of selectors) {
+      try {
+        if (current.matches(selector)) {
+          console.log('[Capture] Found container:', selector);
+          return current;
+        }
+      } catch (e) {
+        console.warn('[Capture] Selector match failed:', e);
+      }
     }
-  };
+    current = current.parentElement;
+  }
+
+  // If no container found, return closest parent with content
+  console.log('[Capture] No specific container found, using parent');
+  return el.parentElement || document.body;
   
   let cur = el;
   while (cur && cur !== document.body) {
@@ -128,22 +149,88 @@ function nearestPostContainer(el) {
 }
 
 function extractTextFromContainer(container) {
+  console.log('[Capture] Extracting text from container:', container.tagName, container.className);
+  
+  // Try LinkedIn-specific selectors first
+  const linkedInSelectors = [
+    '.feed-shared-update-v2__description',
+    '.feed-shared-text-view',
+    '.feed-shared-inline-show-more-text',
+    '.feed-shared-update-v2__commentary',
+    '.update-components-text',
+    '[data-test-id="main-feed-activity-card__commentary"]'
+  ];
+
+  for (const selector of linkedInSelectors) {
+    const element = container.querySelector(selector);
+    if (element) {
+      console.log('[Capture] Found LinkedIn text container:', selector);
+      const text = (element.innerText || element.textContent || '').trim();
+      if (text) {
+        console.log('[Capture] LinkedIn text preview:', text.slice(0, 100) + '...');
+        return text;
+      }
+    }
+  }
+
+  // Fallback to general extraction
+  console.log('[Capture] Using general text extraction');
   const clone = container.cloneNode(true);
+  
   // Remove non-content elements
-  clone.querySelectorAll('script,style,noscript,svg').forEach(n => n.remove());
-  // Remove buttons/controls
-  clone.querySelectorAll('button,[role="button"],a[role="button"]').forEach(n => n.remove());
-  return (clone.innerText || '').replace(/\s+/g, ' ').trim();
+  clone.querySelectorAll('script,style,noscript,svg,iframe,img').forEach(n => n.remove());
+  
+  // Remove buttons/controls/headers
+  clone.querySelectorAll('button,[role="button"],a[role="button"],[role="heading"],header,nav').forEach(n => n.remove());
+  
+  // Remove LinkedIn UI elements
+  clone.querySelectorAll('.feed-shared-control-menu,.feed-shared-social-actions,.social-details-social-counts').forEach(n => n.remove());
+  
+  const text = (clone.innerText || clone.textContent || '').replace(/\s+/g, ' ').trim();
+  console.log('[Capture] General text preview:', text.slice(0, 100) + '...');
+  return text;
 }
 
 async function handleClick(ev) {
   try {
     console.log('[Capture] Click detected at:', ev.clientX, ev.clientY);
-    const container = nearestPostContainer(ev.target);
-    await expandSeeMore(container);
-    const text = extractTextFromContainer(container);
+    console.log('[Capture] Screen coords:', window.screenX, window.screenY);
     
-    // Always send click event, even if text is empty
+    // Get clicked element's text content first
+    let directText = '';
+    try {
+      directText = ev.target.innerText || ev.target.textContent || '';
+    } catch (e) {
+      console.warn('[Capture] Failed to get direct text:', e);
+    }
+
+    // Then try to find a larger container
+    let containerText = '';
+    try {
+      const container = nearestPostContainer(ev.target);
+      await expandSeeMore(container);
+      containerText = extractTextFromContainer(container);
+    } catch (e) {
+      console.warn('[Capture] Container extraction failed:', e);
+    }
+
+    // Use the longer text content
+    const text = containerText.length > directText.length ? containerText : directText;
+    
+    // More accurate coordinate calculation
+    const dpr = window.devicePixelRatio || 1;
+    const globalX = Math.round((window.screenX || window.screenLeft || 0) + (ev.clientX * dpr));
+    const globalY = Math.round((window.screenY || window.screenTop || 0) + (ev.clientY * dpr));
+    
+    console.log('[Capture] Sending click:', {
+      globalX, globalY,
+      dpr,
+      screenX: window.screenX,
+      screenY: window.screenY,
+      url: location.href,
+      text: text.slice(0, 100) + '...' // Log preview
+    });
+
     const payload = {
       type: 'POST_CONTENT',
       text: text || 'No text extracted',
@@ -189,36 +276,42 @@ async function handleClick(ev) {
   }
 }
 
-window.addEventListener('click', handleClick, { capture: true });
+// Add debounce to prevent duplicate events
+let lastClickTime = 0;
+const CLICK_DEBOUNCE_MS = 200;
 
-// Some embedded viewers (PDF embed/object) don't always dispatch synthetic
-// click events to the page JS. Add lower-level listeners and try to attach
-// to embed/object elements so we catch clicks inside Chrome's PDF viewer.
-function _install_extra_listeners() {
-  try {
-    window.addEventListener('pointerdown', handleClick, { capture: true });
-    window.addEventListener('mousedown', handleClick, { capture: true });
-    window.addEventListener('mouseup', handleClick, { capture: true });
-
-    // Attach to any embed/object elements if present
-    const els = Array.from(document.querySelectorAll('embed, object'));
-    for (const el of els) {
-      try {
-        el.addEventListener('pointerdown', handleClick, { capture: true });
-        el.addEventListener('mousedown', handleClick, { capture: true });
-        el.addEventListener('mouseup', handleClick, { capture: true });
-      } catch (err) {
-        // Some embeds don't allow attaching listeners; ignore.
-      }
-    }
-  } catch (e) {
-    console.warn('[Capture] Failed to install extra listeners:', e);
+function onMouseEvent(ev) {
+  // Only handle left clicks
+  if (ev.button !== 0) return;
+  
+  // Debounce rapid clicks
+  const now = Date.now();
+  if (now - lastClickTime < CLICK_DEBOUNCE_MS) {
+    console.log('[Capture] Debounced click event');
+    return;
   }
+  lastClickTime = now;
+
+  handleClick(ev);
 }
 
-// Install immediately and also attempt again after a short delay in case the
-// PDF embed is added after the content script runs.
-_install_extra_listeners();
-setTimeout(_install_extra_listeners, 500);
+// Only listen for mousedown to get the most accurate click position
+window.addEventListener('mousedown', onMouseEvent, { capture: true });
+
+// Handle PDF embeds specially
+function installPdfListeners() {
+  const pdfElements = document.querySelectorAll('embed[type="application/pdf"], object[type="application/pdf"]');
+  pdfElements.forEach(el => {
+    try {
+      el.addEventListener('mousedown', onMouseEvent, { capture: true });
+    } catch (err) {
+      console.warn('[Capture] Could not attach to PDF viewer:', err);
+    }
+  });
+}
+
+// Install PDF handlers now and after a delay for dynamic embeds
+installPdfListeners();
+setTimeout(installPdfListeners, 1000);
 
 

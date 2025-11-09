@@ -175,6 +175,31 @@ def set_config(hz: Optional[float] = Body(None, embed=True)) -> dict:
         state.config.hz = hz
     return {"hz": state.config.hz}
 
+@app.get("/recent_screenshots")
+def recent_screenshots(seconds: float = 1.0) -> dict:
+    """Return paths of screenshots taken in the last N seconds."""
+    import glob
+    import time
+    import os
+    
+    now = time.time()
+    folder = os.path.join(state.config.output_base, time.strftime("%Y-%m-%d"))
+    if not os.path.exists(folder):
+        return {"screenshots": []}
+        
+    screenshots = []
+    try:
+        for png in glob.glob(os.path.join(folder, "*.png")):
+            try:
+                mtime = os.path.getmtime(png)
+                if now - mtime <= seconds:
+                    screenshots.append(png)
+            except Exception:
+                continue
+    except Exception as e:
+        logger.exception(f"Error listing screenshots: {e}")
+    return {"screenshots": sorted(screenshots)}
+
 
 @app.post("/ext_event")
 def ext_event(payload: dict = Body(...)) -> dict:

@@ -37,6 +37,17 @@ connectNativeHost();
 
 async function sendToBackend(payload) {
   try {
+    console.log('[Capture] Checking for recent screenshots...');
+    // First try to get any recent screenshots
+    const screenshotRes = await fetch(`${BACKEND}/recent_screenshots?seconds=0.5`);
+    if (screenshotRes.ok) {
+      const { screenshots = [] } = await screenshotRes.json();
+      if (screenshots.length > 0) {
+        payload.screenshot_path = screenshots[screenshots.length - 1];
+        console.log('[Capture] Found recent screenshot:', payload.screenshot_path);
+      }
+    }
+
     console.log('[Capture] Sending to backend:', payload);
     const res = await fetch(`${BACKEND}/ext_event`, {
       method: 'POST',
@@ -68,6 +79,7 @@ function sendToNativeHost(payload) {
         resolve({ ok: false, error: 'no native port' });
         return;
       }
+      console.log('[Capture] Payload before native send:', payload);
       const onMessage = (msg) => {
         console.log('[Capture] Native response:', msg);
         cleanup();
@@ -92,9 +104,26 @@ function sendToNativeHost(payload) {
   });
 }
 
+// Debounce for duplicate messages
+const messageDebounce = new Map(); // tabId -> { payload, timestamp }
+const DEBOUNCE_MS = 200;
+
 // Receive one-off messages
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message && message.type === 'POST_CONTENT') {
+    const tabId = sender?.tab?.id;
+    const now = Date.now();
+    
+    // Check for duplicate message from this tab
+    if (tabId) {
+      const lastMsg = messageDebounce.get(tabId);
+      if (lastMsg && now - lastMsg.timestamp < DEBOUNCE_MS) {
+        console.log('[Capture] Debounced duplicate message from tab', tabId);
+        sendResponse({ ok: true, status: 'debounced' });
+        return false;
+      }
+    }
+    
     console.log('[Capture] Received POST_CONTENT message:', message);
     const payload = {
       text: message.text,
@@ -105,7 +134,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       global_x: message.global_x,
       global_y: message.global_y,
       devicePixelRatio: message.devicePixelRatio,
-      tabId: sender?.tab?.id,
+      tabId: tabId,
     };
     
     // Send response immediately to keep port open, then send data asynchronously

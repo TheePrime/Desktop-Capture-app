@@ -84,4 +84,15 @@ ipcMain.handle('backend:setHz', async (_evt, hz) => {
   }
 });
 
+// New: endpoint to check for recent screenshots
+ipcMain.handle('backend:recentScreenshots', async (_evt, seconds = 1.0) => {
+  try {
+    if (!fetchImpl) throw new Error('fetch not available in main process');
+    const res = await fetchImpl(`${BACKEND}/recent_screenshots?seconds=${seconds}`);
+    return await res.json();
+  } catch (e) {
+    return { error: String(e) };
+  }
+});
+
 

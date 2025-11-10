@@ -185,6 +185,45 @@ def set_config(hz: Optional[float] = Body(None, embed=True)) -> dict:
         state.config.hz = hz
     return {"hz": state.config.hz}
 
+
+@app.post("/start_listener")
+def start_listener() -> dict:
+    """Start only the OS click listener (debug endpoint). Returns any exception text on failure."""
+    try:
+        state.listener.start()
+        return {"listener_started": True}
+    except Exception as e:
+        logger.exception("Failed to start listener via endpoint")
+        return {"listener_started": False, "error": str(e)}
+
+
+@app.post("/stop_listener")
+def stop_listener() -> dict:
+    """Stop only the OS click listener (debug endpoint)."""
+    try:
+        state.listener.stop()
+        return {"listener_stopped": True}
+    except Exception as e:
+        logger.exception("Failed to stop listener via endpoint")
+        return {"listener_stopped": False, "error": str(e)}
+
+
+@app.get("/listener_status")
+def listener_status() -> dict:
+    """Return a simple diagnostic about the listener object."""
+    try:
+        listener_obj = getattr(state.listener, '_listener', None)
+        running = False
+        if listener_obj is not None:
+            try:
+                running = bool(getattr(listener_obj, 'running', False))
+            except Exception:
+                running = False
+        return {"listener_running": running, "listener_obj": str(listener_obj)}
+    except Exception as e:
+        logger.exception("listener_status error")
+        return {"error": str(e)}
+
 @app.get("/recent_screenshots")
 def recent_screenshots(seconds: float = 1.0) -> dict:
     """Return paths of screenshots taken in the last N seconds."""

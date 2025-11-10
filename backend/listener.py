@@ -106,62 +106,7 @@ def _get_active_process_info() -> tuple[Optional[str], Optional[int]]:
         return None, None
 
 
-def _looks_like_adobe_reader_process(name: Optional[str]) -> bool:
-    if not name:
-        return False
-    n = name.lower()
-    # Common Adobe Reader process names: AcroRd32.exe, AcroRd64.exe, Acrobat.exe
-    return any(k in n for k in ("acro", "acrord", "adobe"))
 
-
-def _extract_pdf_from_title(title: Optional[str]) -> tuple[Optional[str], Optional[str]]:
-    """Try to extract a PDF filename or path from a window title.
-
-    Returns (full_path_or_none, filename_or_none). If only filename is found,
-    full_path_or_none will be None and filename_or_none will contain the name.
-    """
-    if not title:
-        return None, None
-    t = title.strip()
-    # Look for .pdf in the title
-    idx = t.lower().find(".pdf")
-    if idx == -1:
-        return None, None
-    # Try to expand backwards to capture the full path or filename
-    start = idx
-    while start > 0 and t[start] not in (' ', '"', '\'', '-', '|', '\\', '/'):
-        start -= 1
-    # include the .pdf
-    pdf_candidate = t[start: idx + 4].strip(' -"\'')
-    # Clean up surrounding separators like ' - Adobe Acrobat'
-    pdf_candidate = pdf_candidate.strip()
-    if pdf_candidate.lower().endswith('.pdf'):
-        # If it looks like a full path (contains a drive letter), return as full
-        if ":" in pdf_candidate or pdf_candidate.startswith("/"):
-            return pdf_candidate, os.path.basename(pdf_candidate)
-        return None, os.path.basename(pdf_candidate)
-    return None, None
-
-
-def _find_file_in_common_places(filename: str) -> Optional[str]:
-    """Quick heuristic: look for filename in common user folders (Downloads, Desktop, Documents).
-
-    This is intentionally non-recursive for performance; if not found we return None.
-    """
-    user = os.path.expanduser("~")
-    candidates = [
-        os.path.join(user, "Downloads"),
-        os.path.join(user, "Desktop"),
-        os.path.join(user, "Documents"),
-    ]
-    for d in candidates:
-        try:
-            p = os.path.join(d, filename)
-            if os.path.exists(p):
-                return p
-        except Exception:
-            continue
-    return None
 
 
 def _get_display_id_for_point(x: int, y: int) -> int:
@@ -298,10 +243,19 @@ class GlobalClickListener:
             try:
                 if not pressed or str(button) != "Button.left":
                     return
-                logger.debug(f"Mouse click detected: x={x}, y={y}, button={button}")
+                # Gather context first so we can log a single, informative line
                 app_name, pid = _get_active_process_info()
                 title = _get_active_window_title()
                 display_id = _get_display_id_for_point(x, y)
+                # Verbose log for every OS click so we can diagnose missed Acrobat events
+                try:
+                    logger.info(
+                        f"OS click detected: x={x}, y={y}, button={button}, "
+                        f"app_name={app_name}, process_id={pid}, window_title={title}, display_id={display_id}"
+                    )
+                except Exception:
+                    # Non-fatal logging failure should not stop processing
+                    logger.debug("OS click detected (failed to format full info)")
                 click_record = {
                     "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                     "x": x,
@@ -312,23 +266,89 @@ class GlobalClickListener:
                     "display_id": display_id,
                     "source": "os",
                 }
-                # If this looks like an Adobe Reader window, attempt to extract the
-                # open PDF path or filename from the window title and try to resolve
-                # it to a full path in common locations.
+                # If this looks like a browser window (Chrome/Edge/Firefox), attempt a
+                # simple clipboard-based selection extraction (Ctrl+C). This is a
+                # lightweight, cross-browser approach that works for typical web pages
+                # and Chrome's built-in PDF viewer. Keep this optional and non-fatal.
                 try:
-                    if _looks_like_adobe_reader_process(app_name) or (title and "adobe" in title.lower()):
-                        full, name = _extract_pdf_from_title(title)
-                        if full:
-                            click_record["doc_path"] = full
-                        elif name:
-                            # Try to find the file in common user folders
-                            found = _find_file_in_common_places(name)
-                            if found:
-                                click_record["doc_path"] = found
-                            else:
-                                click_record["doc_name"] = name
+                    name_lower = (app_name or "").lower()
+                    title_lower = (title or "").lower()
+                    if any(b in name_lower for b in ("chrome", "msedge", "firefox", "brave", "opera")) or "google chrome" in title_lower:
+                        import time
+                        try:
+                            import win32clipboard
+                        except Exception:
+                            win32clipboard = None
+
+                        prev_clip = None
+                        if win32clipboard:
+                            try:
+                                win32clipboard.OpenClipboard()
+                                try:
+                                    prev_clip = win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
+                                except Exception:
+                                    prev_clip = None
+                                finally:
+                                    win32clipboard.CloseClipboard()
+                            except Exception:
+                                prev_clip = None
+
+                        try:
+                            logger.info("Attempting clipboard-based selection extraction (Ctrl+C) for browser window")
+                        except Exception:
+                            pass
+                        try:
+                            pyautogui.hotkey('ctrl', 'c')
+                        except Exception:
+                            logger.warning("pyautogui.hotkey('ctrl','c') failed or unavailable")
+
+                        sel_text = None
+                        if win32clipboard:
+                            for _ in range(10):
+                                try:
+                                    win32clipboard.OpenClipboard()
+                                    try:
+                                        data = win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
+                                        if data and data != prev_clip:
+                                            sel_text = data
+                                            win32clipboard.CloseClipboard()
+                                            break
+                                    except Exception:
+                                        pass
+                                    finally:
+                                        try:
+                                            win32clipboard.CloseClipboard()
+                                        except Exception:
+                                            pass
+                                except Exception:
+                                    pass
+                                time.sleep(0.05)
+
+                        if sel_text:
+                            click_record["text"] = sel_text.strip()
+                            try:
+                                logger.info(f"Clipboard selection extracted ({len(sel_text)} chars)")
+                            except Exception:
+                                pass
+                        else:
+                            try:
+                                logger.info("No clipboard selection detected after Ctrl+C")
+                            except Exception:
+                                pass
+
+                        # Restore previous clipboard content
+                        if win32clipboard and prev_clip is not None:
+                            try:
+                                win32clipboard.OpenClipboard()
+                                try:
+                                    win32clipboard.EmptyClipboard()
+                                    win32clipboard.SetClipboardData(win32clipboard.CF_UNICODETEXT, prev_clip)
+                                finally:
+                                    win32clipboard.CloseClipboard()
+                            except Exception:
+                                pass
                 except Exception:
-                    # Non-fatal: if extraction fails, continue without doc info
+                    # Non-fatal: if extraction fails, continue without text
                     pass
                 logger.info(f"Calling on_click callback: {click_record}")
                 self.config.on_click(click_record)

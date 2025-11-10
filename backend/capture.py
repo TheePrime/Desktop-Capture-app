@@ -130,8 +130,11 @@ class ScreenCapture:
                     )
 
                     folder = day_folder(self.config.output_base)
+                    # Save 1Hz screenshots to screenshots subfolder
+                    screenshots_folder = os.path.join(folder, "screenshots")
+                    os.makedirs(screenshots_folder, exist_ok=True)
                     filename = utc_iso_millis() + ".png"
-                    path = os.path.join(folder, filename)
+                    path = os.path.join(screenshots_folder, filename)
                     # Attempt to save with a small retry in case of transient IO errors
                     saved = False
                     last_exc = None

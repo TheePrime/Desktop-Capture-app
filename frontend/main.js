@@ -160,12 +160,120 @@ function registerIpcHandlersOnce() {
   ipcHandlersRegistered = true;
 
   ipcMain.handle('tracking:status', () => ({ isTracking, hz: currentHz }));
-  ipcMain.handle('tracking:start', () => { startTrackingLoop(); return { success: true }; });
-  ipcMain.handle('tracking:stop', () => { stopTrackingLoop(); return { success: true }; });
-  ipcMain.handle('tracking:setHz', (_event, hz) => { 
+  ipcMain.handle('tracking:start', async () => { 
+    startTrackingLoop(); 
+    // Start backend screenshot capture
+    try {
+      const https = require('http');
+      const postData = '';
+      const options = {
+        hostname: '127.0.0.1',
+        port: 8000,
+        path: '/start',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(postData)
+        }
+      };
+      
+      await new Promise((resolve, reject) => {
+        const req = https.request(options, (res) => {
+          let data = '';
+          res.on('data', (chunk) => { data += chunk; });
+          res.on('end', () => {
+            console.log('[Electron] Backend /start response:', data);
+            resolve(data);
+          });
+        });
+        req.on('error', (e) => {
+          console.error('[Electron] Failed to start backend:', e);
+          reject(e);
+        });
+        req.write(postData);
+        req.end();
+      });
+    } catch (e) {
+      console.error('[Electron] Error calling backend /start:', e);
+    }
+    return { success: true }; 
+  });
+  ipcMain.handle('tracking:stop', async () => { 
+    stopTrackingLoop(); 
+    // Stop backend screenshot capture
+    try {
+      const https = require('http');
+      const postData = '';
+      const options = {
+        hostname: '127.0.0.1',
+        port: 8000,
+        path: '/stop',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(postData)
+        }
+      };
+      
+      await new Promise((resolve, reject) => {
+        const req = https.request(options, (res) => {
+          let data = '';
+          res.on('data', (chunk) => { data += chunk; });
+          res.on('end', () => {
+            console.log('[Electron] Backend /stop response:', data);
+            resolve(data);
+          });
+        });
+        req.on('error', (e) => {
+          console.error('[Electron] Failed to stop backend:', e);
+          reject(e);
+        });
+        req.write(postData);
+        req.end();
+      });
+    } catch (e) {
+      console.error('[Electron] Error calling backend /stop:', e);
+    }
+    return { success: true }; 
+  });
+  ipcMain.handle('tracking:setHz', async (_event, hz) => { 
     const val = parseFloat(hz);
     if (!Number.isNaN(val) && val > 0) {
       currentHz = val;
+      // Update backend Hz
+      try {
+        const https = require('http');
+        const postData = JSON.stringify({ hz: val });
+        const options = {
+          hostname: '127.0.0.1',
+          port: 8000,
+          path: '/config',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(postData)
+          }
+        };
+        
+        await new Promise((resolve, reject) => {
+          const req = https.request(options, (res) => {
+            let data = '';
+            res.on('data', (chunk) => { data += chunk; });
+            res.on('end', () => {
+              console.log('[Electron] Backend /config response:', data);
+              resolve(data);
+            });
+          });
+          req.on('error', (e) => {
+            console.error('[Electron] Failed to update backend Hz:', e);
+            reject(e);
+          });
+          req.write(postData);
+          req.end();
+        });
+      } catch (e) {
+        console.error('[Electron] Error calling backend /config:', e);
+      }
       if (isTracking) {
         restartTrackingLoop();
       }

@@ -252,10 +252,17 @@ def recent_screenshots(seconds: float = 1.0) -> dict:
 
 @app.post("/ext_event")
 def ext_event(payload: dict = Body(...)) -> dict:
-    # Skip screenshot processing if Electron is not active
-    if not state.electron_active:
-        logger.info("Skipping screenshot attachment - Electron app not active")
-        payload["screenshot_path"] = None
+    # Capture screenshot immediately when click event arrives
+    screenshot_path = None
+    try:
+        if state.capture and state.capture.is_running():
+            screenshot_path = state.capture.capture_once()
+            if screenshot_path:
+                logger.info(f"Captured on-demand screenshot: {screenshot_path}")
+        else:
+            logger.warning("Screenshot capture not running - start with POST /start")
+    except Exception as e:
+        logger.warning(f"Failed to capture on-demand screenshot: {e}")
     
     # Payload expected from extension: {text, url, tabId?, profile?, x?, y?}
     now = time.time()
@@ -295,6 +302,9 @@ def ext_event(payload: dict = Body(...)) -> dict:
             rec = matched_entry.get("record", {})
             # Merge extension payload fields
             rec["text"] = payload.get("text") or rec.get("text")
+            # Attach on-demand screenshot
+            if screenshot_path:
+                rec["screenshot_path"] = screenshot_path
             # Handle file:// URLs specially (PDFs)
             url_val = payload.get("url")
             if isinstance(url_val, str) and url_val.startswith("file://"):
@@ -314,7 +324,7 @@ def ext_event(payload: dict = Body(...)) -> dict:
             rec["display_id"] = payload.get("display_id") or rec.get("display_id")
             rec["source"] = "ext"
             state.logger.log_click(rec)
-            return {"ok": True, "merged": True}
+            return {"ok": True, "merged": True, "screenshot_path": screenshot_path}
         except Exception:
             return {"ok": False, "error": "merge_failed"}
 
@@ -332,6 +342,7 @@ def ext_event(payload: dict = Body(...)) -> dict:
         "process_id": None,
         "window_title": payload.get("title"),
         "display_id": payload.get("display_id"),
+        "screenshot_path": screenshot_path,
     }
 
     # Treat file:// URLs as document paths (PDFs). Normalize and store as doc_path
@@ -435,7 +446,7 @@ def ext_event(payload: dict = Body(...)) -> dict:
         pass
 
     state.logger.log_click(record)
-    return {"ok": True, "merged": False}
+    return {"ok": True, "merged": False, "screenshot_path": screenshot_path}
 
 
 def create_app() -> FastAPI:

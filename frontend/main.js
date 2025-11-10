@@ -302,7 +302,7 @@ function startTrackingLoop() {
       // Read the latest screenshot from backend's saved files
       const dataRoot = path.resolve(__dirname, '..', 'data');
       const dayFolder = getTodayFolder();
-      const shotsDir = path.join(dataRoot, dayFolder);
+      const shotsDir = path.join(dataRoot, dayFolder);  // Backend saves directly to data/YYYY-MM-DD/
       
       let files = [];
       try {

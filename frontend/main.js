@@ -4,6 +4,7 @@ const fsPromises = require('fs').promises;
 const fs = require('fs');
 const WebSocket = require('ws');
 const { spawn } = require('child_process');
+const os = require('os');
 
 let mainWindow = null;
 let isTracking = false;
@@ -17,6 +18,12 @@ let backendProcess = null;
 
 // Screenshot capture settings
 const SCREENSHOT_QUALITY = 0.8;
+
+// Use Documents folder for easy access to screenshots
+function getDataRoot() {
+  const documentsPath = path.join(os.homedir(), 'Documents', 'DesktopCapture');
+  return documentsPath;
+}
 
 // Function to start the backend service
 function startBackendService() {
@@ -159,7 +166,7 @@ async function captureScreenshot() {
     // If backend has recently saved a screenshot (which includes a cursor overlay via backend/capture.py),
     // prefer that image to ensure the cursor is visible. Look for recent files in data/<today>/screenshots.
     try {
-      const dataRoot = path.resolve(__dirname, '..', 'data');
+      const dataRoot = getDataRoot();
       const dayFolder = getTodayFolder();
       const shotsDir = path.join(dataRoot, dayFolder, 'screenshots');
       const maxAgeMs = 3000; // 3 seconds
@@ -484,7 +491,7 @@ async function saveScreenshotToDisk(dataUrl) {
   try {
     if (!dataUrl) return null;
     const dayFolder = getTodayFolder();
-    const screenshotsDir = path.join(path.resolve(__dirname, '..', 'data'), dayFolder, 'screenshots');
+    const screenshotsDir = path.join(getDataRoot(), dayFolder, 'screenshots');
     await ensureDir(screenshotsDir);
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `shot-${ts}.png`;
@@ -508,8 +515,8 @@ async function saveScreenshotToDisk(dataUrl) {
 }
 
 async function startLogWatcher() {
-  // Determine clicks.ndjson path for today
-  const dataRoot = path.resolve(__dirname, '..', 'data');
+  // Determine clicks.ndjson path for today - using Documents folder
+  const dataRoot = getDataRoot();
   const dayFolder = getTodayFolder();
   const filePath = path.join(dataRoot, dayFolder, 'clicks.ndjson');
   watchedFile = filePath;

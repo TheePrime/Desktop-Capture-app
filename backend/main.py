@@ -21,8 +21,14 @@ LOG_PATH = os.path.join(os.path.dirname(__file__), 'backend_ext.log')
 logging.basicConfig(filename=LOG_PATH, level=logging.INFO, format='%(asctime)s [backend] %(levelname)s: %(message)s')
 logger = logging.getLogger('backend_main')
 
-
-OUTPUT_BASE = os.path.join(os.path.dirname(__file__), "..", "data")
+# Use user's Documents folder for easy access
+# Falls back to project folder if Documents not available
+try:
+    import pathlib
+    DOCUMENTS = str(pathlib.Path.home() / "Documents" / "DesktopCapture")
+    OUTPUT_BASE = DOCUMENTS
+except Exception:
+    OUTPUT_BASE = os.path.join(os.path.dirname(__file__), "..", "data")
 
 
 class AppState:

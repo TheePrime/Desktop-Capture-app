@@ -357,35 +357,15 @@ async function handleClick(ev) {
     };
     console.log('[Capture] Sending click event:', payload);
     
-    // Send directly to backend HTTP endpoint (most reliable)
-    // This bypasses the extension background script entirely
-    try {
-      const response = await fetch('http://127.0.0.1:8000/ext_event', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload)
-      });
-      
-      if (response.ok) {
-        console.log('[Capture] Successfully sent to backend via HTTP');
-        return; // Success, no need for fallbacks
-      } else {
-        console.warn('[Capture] Backend HTTP request failed:', response.status);
-      }
-    } catch (err) {
-      console.warn('[Capture] Failed to send to backend via HTTP:', err);
-    }
-    
-    // Fallback: Try extension background script
+    // Send data to the extension background (preferred) so it can forward to
+    // the native host or backend. Fall back to sending to the Electron app
+    // (if present) via electronAPI/WebSocket as before.
     try {
       // Try persistent port first
       if (capturePort && typeof capturePort.postMessage === 'function') {
         try {
           capturePort.postMessage(payload);
           console.log('[Capture] Posted payload to persistent port');
-          return;
         } catch (err) {
           console.warn('[Capture] Failed to post to persistent port:', err);
         }
@@ -399,35 +379,41 @@ async function handleClick(ev) {
               console.log('[Capture] sendMessage response:', resp);
             }
           });
-          return;
         } catch (err) {
           console.warn('[Capture] chrome.runtime.sendMessage failed:', err);
         }
-      }
-    } catch (err) {
-      console.error('[Capture] Error with extension messaging:', err);
-    }
-    
-    // Final fallback: WebSocket (legacy)
-    try {
-      if (typeof WebSocket !== 'undefined') {
+      } else {
+        // No extension runtime available; fall back to Electron/WebSocket
         const electronData = {
           ...payload,
           timestamp: new Date().toISOString(),
           browser_url: location.href,
           app_name: 'chrome',
         };
-        const ws = new WebSocket('ws://localhost:8000/ws');
-        ws.onopen = () => {
-          ws.send(JSON.stringify(electronData));
-          ws.close();
-        };
-        console.log('[Capture] Sent payload via WebSocket fallback');
-      } else {
-        console.warn('[Capture] No method available to send click payload to backend');
+        if (window.electronAPI && typeof window.electronAPI.sendClickData === 'function') {
+          try {
+            window.electronAPI.sendClickData(electronData);
+            console.log('[Capture] Sent payload to electronAPI');
+          } catch (err) {
+            console.warn('[Capture] electronAPI.sendClickData failed:', err);
+          }
+        } else if (typeof WebSocket !== 'undefined') {
+          try {
+            const ws = new WebSocket('ws://localhost:8000/ws');
+            ws.onopen = () => {
+              ws.send(JSON.stringify(electronData));
+              ws.close();
+            };
+            console.log('[Capture] Sent payload via WebSocket fallback');
+          } catch (err) {
+            console.warn('[Capture] WebSocket fallback failed:', err);
+          }
+        } else {
+          console.warn('[Capture] No method available to send click payload to backend');
+        }
       }
     } catch (err) {
-      console.warn('[Capture] WebSocket fallback failed:', err);
+      console.error('[Capture] Error sending payload to background/electron:', err);
     }
   
   } catch (e) {

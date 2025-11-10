@@ -294,71 +294,9 @@ function startTrackingLoop() {
     return; // already running
   }
   isTracking = true;
-  const intervalMs = Math.max(100, Math.round(1000 / (currentHz || 1)));
-  console.log(`[Electron] Starting screenshot display loop at ${currentHz} Hz (interval: ${intervalMs}ms)`);
-  if (trackingInterval) clearInterval(trackingInterval);
-  trackingInterval = setInterval(async () => {
-    try {
-      // Read the latest screenshot from backend's saved files
-      const dataRoot = path.resolve(__dirname, '..', 'data');
-      const dayFolder = getTodayFolder();
-      const shotsDir = path.join(dataRoot, dayFolder);  // Backend saves directly to data/YYYY-MM-DD/
-      
-      let files = [];
-      try {
-        files = await fsPromises.readdir(shotsDir);
-      } catch (e) {
-        console.warn('[Electron] Cannot read screenshots folder:', e);
-        return;
-      }
-      
-      // Find the newest .png file from backend
-      let newest = null;
-      for (const f of files) {
-        if (!f.toLowerCase().endsWith('.png')) continue;
-        try {
-          const fullPath = path.join(shotsDir, f);
-          const st = await fsPromises.stat(fullPath);
-          if (!newest || st.mtimeMs > newest.mtimeMs) {
-            newest = { name: f, path: fullPath, mtimeMs: st.mtimeMs };
-          }
-        } catch (e) {
-          continue;
-        }
-      }
-      
-      if (!newest) {
-        console.warn('[Electron] No screenshots found');
-        return;
-      }
-      
-      // Check if this is a new screenshot (within last 2 seconds)
-      const age = Date.now() - newest.mtimeMs;
-      if (age > 3000) {
-        // Too old, backend may not be running
-        return;
-      }
-      
-      // Read and send to renderer
-      try {
-        const buf = await fsPromises.readFile(newest.path);
-        const screenshot = `data:image/png;base64,${buf.toString('base64')}`;
-        
-        if (mainWindow) {
-          mainWindow.webContents.send('screenshot-tick', {
-            timestamp: new Date().toISOString(),
-            screenshot,
-            screenshot_path: newest.path
-          });
-        }
-      } catch (e) {
-        console.error('[Electron] Failed to read screenshot:', e);
-      }
-    } catch (e) {
-      console.error('[Electron] Screenshot display loop error:', e);
-    }
-  }, intervalMs);
-  console.log('[Electron] Screenshot display loop started - showing backend screenshots');
+  console.log('[Electron] Tracking started - screenshots captured by backend only');
+  // No screenshot display loop needed - backend handles all screenshot capture
+  // Screenshots are only shown in Activities view when attached to click data
 }
 
 function stopTrackingLoop() {

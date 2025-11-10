@@ -11,22 +11,16 @@ const clearBtn = document.getElementById('clearBtn');
 const hzInput = document.getElementById('hzInput');
 const status = document.getElementById('status');
 const navActivities = document.getElementById('navActivities');
-const navScreenshots = document.getElementById('navScreenshots');
 const viewActivities = document.getElementById('viewActivities');
-const viewScreenshots = document.getElementById('viewScreenshots');
 const activityList = document.getElementById('activityList');
 const previewContent = document.getElementById('previewContent');
 const previewDetails = document.getElementById('previewDetails');
 const dataTable = document.getElementById('dataTable');
-const screenshotGrid = document.getElementById('screenshotGrid');
 
 // State
 let updateInterval;
 let clickData = [];
 let selectedEntryId = null;
-let screenshotsData = [];
-const MAX_SCREENSHOTS = 300;
-let currentView = 'activities';
 
 // Load saved data on startup
 try {
@@ -36,14 +30,6 @@ try {
 } catch (e) {
     console.error('Failed to load saved data:', e);
     clickData = [];
-}
-
-try {
-    screenshotsData = JSON.parse(localStorage.getItem('screenshotsData') || '[]');
-    refreshScreenshotGrid();
-} catch (e) {
-    console.error('Failed to load screenshots:', e);
-    screenshotsData = [];
 }
 
 async function updateStatus() {
@@ -168,65 +154,6 @@ ipcRenderer.on('click-captured', async (event, clickInfo) => {
     }
 });
 
-// Handle periodic screenshot ticks
-ipcRenderer.on('screenshot-tick', async (event, { timestamp, screenshot, screenshot_path }) => {
-    console.log('[Renderer] Received screenshot-tick event');
-    try {
-        console.log('[Renderer] Screenshot timestamp:', timestamp);
-        // prefer saved file path if provided to avoid huge base64 payloads in renderer
-        let shot = null;
-        if (screenshot_path) {
-            shot = screenshot_path.startsWith('file://') ? screenshot_path : 'file://' + screenshot_path.replace(/\\/g, '/');
-            console.log('[Renderer] Using screenshot_path:', shot);
-        } else {
-            shot = screenshot;
-            console.log('[Renderer] Screenshot data length:', shot ? shot.length : 'null');
-        }
-        await addScreenshotEntry({ timestamp, screenshot: shot });
-    } catch (err) {
-        console.error('[Renderer] Failed to add screenshot:', err);
-    }
-});
-
-async function addScreenshotEntry({ timestamp, screenshot }) {
-    console.log('[Renderer] addScreenshotEntry called');
-    console.log('[Renderer] screenshotGrid element:', screenshotGrid);
-    const entry = { id: Date.now(), timestamp, screenshot };
-    screenshotsData.unshift(entry);
-    if (screenshotsData.length > MAX_SCREENSHOTS) {
-        screenshotsData = screenshotsData.slice(0, MAX_SCREENSHOTS);
-    }
-    localStorage.setItem('screenshotsData', JSON.stringify(screenshotsData));
-    console.log('[Renderer] Calling refreshScreenshotGrid, total screenshots:', screenshotsData.length);
-    refreshScreenshotGrid();
-    console.log('[Renderer] Screenshot saved successfully');
-}
-
-function refreshScreenshotGrid() {
-    if (!screenshotGrid) return;
-    screenshotGrid.innerHTML = '';
-    screenshotsData.forEach((shot) => {
-        const card = document.createElement('div');
-        card.className = 'shot-card';
-        card.innerHTML = `
-          <img src="${shot.screenshot}" alt="screenshot" />
-          <div class="time">${new Date(shot.timestamp).toLocaleTimeString()}</div>
-        `;
-                card.addEventListener('click', () => {
-                    // Switch to Activities view previewing the image
-                    switchView('activities');
-          // Show in preview area too for consistency
-          previewContent.innerHTML = '';
-          const img = document.createElement('img');
-          img.src = shot.screenshot;
-          img.className = 'preview-image';
-          previewContent.appendChild(img);
-          previewDetails.innerHTML = '';
-        });
-        screenshotGrid.appendChild(card);
-    });
-}
-
 function renderDataTable() {
     if (!dataTable) return;
     const headers = ['Time', 'App', 'Window Title', 'X', 'Y', 'URL/Path', 'Text'];
@@ -263,19 +190,6 @@ function renderDataTable() {
     dataTable.innerHTML = '';
     dataTable.appendChild(table);
 }
-
-function switchView(view) {
-    currentView = view;
-    // Sidebar nav
-    navActivities.classList.toggle('active', view === 'activities');
-    navScreenshots.classList.toggle('active', view === 'screenshots');
-    // Sections
-    viewActivities.classList.toggle('active', view === 'activities');
-    viewScreenshots.classList.toggle('active', view === 'screenshots');
-}
-
-navActivities.addEventListener('click', () => switchView('activities'));
-navScreenshots.addEventListener('click', () => switchView('screenshots'));
 
 // UI Event Handlers
 startBtn.addEventListener('click', async () => {
@@ -363,17 +277,6 @@ clearBtn.addEventListener('click', async () => {
         dataTable.innerHTML = '';
     }
 });
-
-// --- DEBUG: Confirm renderer script loaded and IPC event delivery ---
-try {
-    // ipcRenderer is already required at the top of this file; avoid redeclaring it.
-    ipcRenderer.on('screenshot-tick', (event, data) => {
-        console.log('[Renderer TEST] screenshot-tick received:', data);
-    });
-    console.log('[Renderer TEST] IPC listener registered');
-} catch (e) {
-    console.error('[Renderer TEST] Failed to register IPC listener:', e);
-}
 
 // Expose a capture function on window that captures the screen including the cursor.
 // Uses desktopCapturer + getUserMedia, draws a single frame to canvas, then returns a dataURL.

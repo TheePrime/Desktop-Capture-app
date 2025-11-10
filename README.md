@@ -51,6 +51,7 @@ The Desktop Capture App is a three-component system designed to track user activ
 - **Screenshot Association**: Each click record includes path to screenshot
 - **Export Functionality**: Export all data from Electron UI
 - **Persistent Storage**: All data organized by date in `data/` folder
+- **Configurable Location**: Choose where to save screenshots and data via Settings panel (see [SETTINGS_GUIDE.md](SETTINGS_GUIDE.md))
 
 ## 🏗️ Architecture
 

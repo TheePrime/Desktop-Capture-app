@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, screen, dialog, shell } = require('electron');
 const path = require('path');
 const fsPromises = require('fs').promises;
 const fs = require('fs');
@@ -349,6 +349,82 @@ function registerIpcHandlersOnce() {
     return { success: true };
   });
   ipcMain.handle('take-screenshot', async () => await captureScreenshot());
+
+  // Settings Handlers
+  ipcMain.handle('settings:getDataPath', async () => {
+    return getDataPath();
+  });
+
+  ipcMain.handle('settings:browseDataPath', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openDirectory', 'createDirectory'],
+      title: 'Select Data Folder',
+      defaultPath: getDataPath()
+    });
+
+    if (!result.canceled && result.filePaths.length > 0) {
+      const newPath = result.filePaths[0];
+      // Save the custom path to config
+      app.setPath('userData', newPath);
+      
+      // Update backend config to use new path
+      try {
+        const response = await fetch('http://127.0.0.1:8000/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ output_base: path.join(newPath, 'data') })
+        });
+        
+        if (!response.ok) {
+          console.error('[Settings] Failed to update backend config');
+        }
+      } catch (err) {
+        console.error('[Settings] Backend not running:', err);
+      }
+      
+      return newPath;
+    }
+    return null;
+  });
+
+  ipcMain.handle('settings:resetDataPath', async () => {
+    // Reset to default location
+    const defaultPath = app.getPath('userData');
+    app.setPath('userData', defaultPath);
+    
+    // Update backend
+    try {
+      await fetch('http://127.0.0.1:8000/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ output_base: path.join(defaultPath, 'data') })
+      });
+    } catch (err) {
+      console.error('[Settings] Backend not running:', err);
+    }
+    
+    return defaultPath;
+  });
+
+  ipcMain.handle('settings:openDataFolder', async () => {
+    const dataPath = getDataPath();
+    const dataFolder = path.join(dataPath, 'data');
+    
+    // Create folder if it doesn't exist
+    try {
+      await fsPromises.mkdir(dataFolder, { recursive: true });
+    } catch (err) {
+      console.error('[Settings] Failed to create data folder:', err);
+    }
+    
+    // Open in file explorer
+    shell.openPath(dataFolder);
+  });
+}
+
+// Helper function to get current data path
+function getDataPath() {
+  return app.getPath('userData');
 }
 
 app.whenReady().then(() => {

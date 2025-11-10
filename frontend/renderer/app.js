@@ -11,11 +11,20 @@ const clearBtn = document.getElementById('clearBtn');
 const hzInput = document.getElementById('hzInput');
 const status = document.getElementById('status');
 const navActivities = document.getElementById('navActivities');
+const navSettings = document.getElementById('navSettings');
 const viewActivities = document.getElementById('viewActivities');
+const viewSettings = document.getElementById('viewSettings');
 const activityList = document.getElementById('activityList');
 const previewContent = document.getElementById('previewContent');
 const previewDetails = document.getElementById('previewDetails');
 const dataTable = document.getElementById('dataTable');
+
+// Settings UI Elements
+const dataPathInput = document.getElementById('dataPathInput');
+const browseDataPath = document.getElementById('browseDataPath');
+const resetDataPath = document.getElementById('resetDataPath');
+const openDataFolder = document.getElementById('openDataFolder');
+const currentDataPath = document.getElementById('currentDataPath');
 
 // State
 let updateInterval;
@@ -375,9 +384,73 @@ window.captureScreenWithCursor = async function () {
 updateStatus();
 refreshActivityList();
 renderDataTable();
+loadDataPath();
 
 // Start periodic updates
 updateInterval = setInterval(updateStatus, 2000);
+
+// View Switching
+function switchView(targetView) {
+    // Hide all views
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+
+    // Show target view
+    targetView.classList.add('active');
+}
+
+navActivities.addEventListener('click', () => {
+    switchView(viewActivities);
+    navActivities.classList.add('active');
+});
+
+navSettings.addEventListener('click', () => {
+    switchView(viewSettings);
+    navSettings.classList.add('active');
+    loadDataPath(); // Refresh path when opening settings
+});
+
+// Settings Functions
+async function loadDataPath() {
+    try {
+        const dataPath = await ipcRenderer.invoke('settings:getDataPath');
+        dataPathInput.value = dataPath;
+        currentDataPath.textContent = dataPath;
+    } catch (err) {
+        console.error('Failed to load data path:', err);
+    }
+}
+
+browseDataPath.addEventListener('click', async () => {
+    try {
+        const newPath = await ipcRenderer.invoke('settings:browseDataPath');
+        if (newPath) {
+            await loadDataPath();
+        }
+    } catch (err) {
+        console.error('Failed to browse data path:', err);
+        alert('Failed to change data folder');
+    }
+});
+
+resetDataPath.addEventListener('click', async () => {
+    try {
+        await ipcRenderer.invoke('settings:resetDataPath');
+        await loadDataPath();
+    } catch (err) {
+        console.error('Failed to reset data path:', err);
+        alert('Failed to reset data folder');
+    }
+});
+
+openDataFolder.addEventListener('click', async () => {
+    try {
+        await ipcRenderer.invoke('settings:openDataFolder');
+    } catch (err) {
+        console.error('Failed to open data folder:', err);
+        alert('Failed to open data folder');
+    }
+});
 
 // Clean up on window close
 window.addEventListener('beforeunload', () => {

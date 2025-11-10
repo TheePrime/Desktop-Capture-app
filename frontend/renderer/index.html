@@ -213,6 +213,7 @@
 
         <nav class="nav">
           <button id="navActivities" class="nav-item active">Activities</button>
+          <button id="navSettings" class="nav-item">Settings</button>
         </nav>
       </aside>
 
@@ -245,6 +246,43 @@
                 </div>
                 <div class="data-table" id="dataTable"></div>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="viewSettings" class="view">
+          <div class="preview-header">
+            <h2>Settings</h2>
+          </div>
+
+          <div class="settings-content">
+            <div class="card">
+              <h3>Data Storage</h3>
+              <p class="muted">Configure where screenshots and click data are saved</p>
+              
+              <div class="setting-row">
+                <label>Data Folder:</label>
+                <div class="path-control">
+                  <input type="text" id="dataPathInput" class="path-input" readonly />
+                  <button id="browseDataPath" class="secondary-button">Browse...</button>
+                  <button id="resetDataPath" class="secondary-button">Reset to Default</button>
+                </div>
+              </div>
+
+              <div class="setting-row">
+                <button id="openDataFolder" class="secondary-button">Open Data Folder in Explorer</button>
+              </div>
+
+              <p class="info-text">
+                📁 Current location: <span id="currentDataPath" class="code-text"></span>
+              </p>
+            </div>
+
+            <div class="card">
+              <h3>About</h3>
+              <p><strong>Desktop Capture App</strong></p>
+              <p>Version: 1.0.0</p>
+              <p class="muted">Track desktop activities with screenshots and click capture</p>
             </div>
           </div>
         </section>
@@ -576,6 +614,69 @@
 
       .secondary-button:hover:not(:disabled) {
         background: var(--bg);
+      }
+
+      /* Settings View Styles */
+      .settings-content {
+        padding: 2rem;
+        max-width: 800px;
+        overflow-y: auto;
+        height: calc(100vh - 80px);
+      }
+
+      .settings-content .card {
+        margin-bottom: 1.5rem;
+      }
+
+      .settings-content h3 {
+        margin-top: 0;
+        margin-bottom: 0.5rem;
+        font-size: 1.25rem;
+      }
+
+      .setting-row {
+        margin: 1rem 0;
+      }
+
+      .setting-row label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 500;
+      }
+
+      .path-control {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+      }
+
+      .path-input {
+        flex: 1;
+        padding: 0.5rem;
+        border: 1px solid var(--border);
+        border-radius: 0.375rem;
+        font-family: monospace;
+        font-size: 0.875rem;
+        background: var(--bg);
+      }
+
+      .info-text {
+        margin-top: 1rem;
+        padding: 0.75rem;
+        background: var(--bg);
+        border-radius: 0.375rem;
+        font-size: 0.875rem;
+      }
+
+      .code-text {
+        font-family: monospace;
+        font-size: 0.875rem;
+        color: var(--primary);
+      }
+
+      .muted {
+        color: var(--muted);
+        font-size: 0.875rem;
       }
     </style>
 

@@ -180,10 +180,18 @@ def stop() -> dict:
 
 
 @app.post("/config")
-def set_config(hz: Optional[float] = Body(None, embed=True)) -> dict:
+def set_config(
+    hz: Optional[float] = Body(None, embed=True),
+    output_base: Optional[str] = Body(None, embed=True)
+) -> dict:
     if hz is not None and hz > 0:
         state.config.hz = hz
-    return {"hz": state.config.hz}
+    if output_base is not None:
+        state.config.output_base = os.path.abspath(output_base)
+        # Update logger with new output base
+        state.logger = ClickLogger(state.config.output_base)
+        logger.info(f"Updated output_base to: {state.config.output_base}")
+    return {"hz": state.config.hz, "output_base": state.config.output_base}
 
 
 @app.post("/start_listener")

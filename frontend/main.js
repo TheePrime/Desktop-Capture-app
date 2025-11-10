@@ -3,6 +3,7 @@ const path = require('path');
 const fsPromises = require('fs').promises;
 const fs = require('fs');
 const WebSocket = require('ws');
+const { spawn } = require('child_process');
 
 let mainWindow = null;
 let isTracking = false;
@@ -12,9 +13,76 @@ let wsServer = null;
 let logWatcher = null;
 let watchedFile = null;
 let prevLen = 0;
+let backendProcess = null;
 
 // Screenshot capture settings
 const SCREENSHOT_QUALITY = 0.8;
+
+// Function to start the backend service
+function startBackendService() {
+  try {
+    let backendPath;
+    
+    // In production (packaged app), backend is in resources
+    if (app.isPackaged) {
+      backendPath = path.join(process.resourcesPath, 'backend_service.exe');
+    } else {
+      // In development, use the dist folder from backend build
+      backendPath = path.join(__dirname, '..', 'backend', 'dist', 'backend_service.exe');
+      
+      // If not built yet, skip (user must run uvicorn manually)
+      if (!fs.existsSync(backendPath)) {
+        console.log('[Backend] Development mode - backend_service.exe not found');
+        console.log('[Backend] Please run: cd backend && uvicorn main:app --reload');
+        return;
+      }
+    }
+    
+    console.log('[Backend] Starting backend service:', backendPath);
+    
+    // Start the backend process
+    backendProcess = spawn(backendPath, [], {
+      detached: false,
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    
+    backendProcess.stdout.on('data', (data) => {
+      console.log(`[Backend] ${data.toString().trim()}`);
+    });
+    
+    backendProcess.stderr.on('data', (data) => {
+      console.error(`[Backend ERROR] ${data.toString().trim()}`);
+    });
+    
+    backendProcess.on('close', (code) => {
+      console.log(`[Backend] Process exited with code ${code}`);
+      backendProcess = null;
+    });
+    
+    backendProcess.on('error', (err) => {
+      console.error('[Backend] Failed to start:', err);
+      backendProcess = null;
+    });
+    
+    console.log('[Backend] Backend service started successfully');
+  } catch (error) {
+    console.error('[Backend] Error starting backend:', error);
+  }
+}
+
+// Function to stop the backend service
+function stopBackendService() {
+  if (backendProcess) {
+    console.log('[Backend] Stopping backend service...');
+    try {
+      backendProcess.kill();
+      backendProcess = null;
+      console.log('[Backend] Backend service stopped');
+    } catch (error) {
+      console.error('[Backend] Error stopping backend:', error);
+    }
+  }
+}
 
 // Create WebSocket server for extension communication
 function setupWebSocketServer() {
@@ -284,8 +352,14 @@ function registerIpcHandlersOnce() {
 }
 
 app.whenReady().then(() => {
-  setupWebSocketServer();
-  createWindow();
+  // Start backend service first
+  startBackendService();
+  
+  // Wait a moment for backend to initialize
+  setTimeout(() => {
+    setupWebSocketServer();
+    createWindow();
+  }, 2000);
   
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -300,6 +374,7 @@ app.on('window-all-closed', async () => {
     try { logWatcher.close(); } catch {}
   }
   stopTrackingLoop();
+  stopBackendService();  // Stop backend when app closes
   if (process.platform !== 'darwin') app.quit();
 });
 

@@ -1,14 +1,67 @@
 {
-  "name": "desktop-capture-electron",
-  "version": "0.1.0",
+  "name": "desktop-capture-app",
+  "version": "1.0.0",
+  "description": "Desktop activity tracking with screenshots and click capture",
+  "author": "Desktop Capture Team",
   "private": true,
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "pack": "electron-builder --dir"
   },
   "dependencies": {
-    "electron": "29.4.0",
     "node-fetch": "2.6.7",
     "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "electron": "29.4.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.desktopcapture.app",
+    "productName": "Desktop Capture",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend/dist/backend_service.exe",
+        "to": "backend_service.exe"
+      },
+      {
+        "from": "../data",
+        "to": "data",
+        "filter": [
+          "**/*",
+          "!**/*.png"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Desktop Capture"
+    }
   }
 }

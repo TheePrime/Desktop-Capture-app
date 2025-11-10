@@ -8,6 +8,9 @@
 - [Features](#features)
 - [Architecture](#architecture)
 - [Installation](#installation)
+  - [For End Users (Production)](#for-end-users-production)
+  - [For Developers (Development)](#for-developers-development)
+- [Building for Production](#building-for-production)
 - [Usage](#usage)
 - [Project Structure](#project-structure)
 - [API Documentation](#api-documentation)
@@ -83,14 +86,40 @@ The Desktop Capture App is a three-component system designed to track user activ
 
 ## 📦 Installation
 
-### Prerequisites
+### For End Users (Production)
+
+**If you received the installer:**
+
+1. **Install Desktop App:**
+   - Run `Desktop Capture Setup 1.0.0.exe`
+   - Follow the installation wizard
+   - App installs to `C:\Program Files\Desktop Capture\`
+
+2. **Install Chrome Extension:**
+   - Extract `desktop-capture-extension.zip`
+   - Open Chrome → `chrome://extensions/`
+   - Enable "Developer mode"
+   - Click "Load unpacked" → Select extracted folder
+
+3. **Launch:**
+   - Open "Desktop Capture" from desktop shortcut
+   - Backend starts automatically
+   - Click "Start Tracking" to begin
+
+**No Python or Node.js required!** Everything is bundled in the installer.
+
+---
+
+### For Developers (Development)
+
+#### Prerequisites
 
 - **Python 3.8+** (for backend)
 - **Node.js 16+** (for Electron)
 - **Chrome Browser** (for extension)
 - **Windows OS** (for OS-level click tracking)
 
-### Backend Setup
+#### Backend Setup
 
 ```bash
 cd backend
@@ -124,9 +153,38 @@ npm install
 4. Select the `extension/` folder
 5. Extension will appear in toolbar
 
+---
+
+## 🏗️ Building for Production
+
+To create a production-ready installer:
+
+### Quick Build (One Command)
+
+```bash
+build_production.bat
+```
+
+This creates:
+- `frontend/dist/Desktop Capture Setup 1.0.0.exe` - Full installer
+- `extension/desktop-capture-extension.zip` - Chrome extension package
+
+### Detailed Build Instructions
+
+See **[BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md)** for:
+- Step-by-step build process
+- Troubleshooting build issues
+- Configuration options
+- Code signing (optional)
+- Version management
+
+**Quick Start:** See **[BUILD_QUICK_START.md](BUILD_QUICK_START.md)**
+
+---
+
 ## 🚀 Usage
 
-### Starting the System
+### Starting the System (Development Mode)
 
 #### 1. Start Backend (Required First)
 ```bash

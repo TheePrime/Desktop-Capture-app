@@ -416,6 +416,8 @@
         display: flex;
         flex-direction: column;
         min-height: 0;
+        max-height: 180px;
+        flex-shrink: 0;
       }
       .data-panel-header { 
         display: flex; 
@@ -425,7 +427,7 @@
       }
       .data-table { 
         overflow: auto; 
-        max-height: 240px; 
+        max-height: 120px; 
         border: 1px solid var(--border); 
         border-radius: 0.5rem;
         flex: 1;
@@ -505,16 +507,15 @@
       }
 
       .preview-content {
-        flex: 1;
+        flex: 2;
         overflow: auto;
         padding: 1rem;
         display: flex;
         align-items: center;
         justify-content: center;
         background: #f1f5f9;
-        min-height: 0;
+        min-height: 400px;
         position: relative;
-        height: calc(100vh - 400px);
       }
 
       .preview-placeholder {
@@ -535,8 +536,9 @@
         background: white;
         border-top: 1px solid var(--border);
         padding: 1rem;
-        max-height: 300px;
+        max-height: 200px;
         overflow-y: auto;
+        flex-shrink: 0;
       }
 
       .preview-image {

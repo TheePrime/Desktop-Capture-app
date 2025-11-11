@@ -126,6 +126,45 @@ const BACKEND = 'http://127.0.0.1:8000';
 // Track if we've notified backend of app status
 let backendNotified = false;
 
+async function configureBackend() {
+  try {
+    const dataPath = getDataRoot();
+    console.log('[Electron] Configuring backend with output_base:', dataPath);
+    
+    const https = require('http');
+    const postData = JSON.stringify({ output_base: dataPath });
+    const options = {
+      hostname: '127.0.0.1',
+      port: 8000,
+      path: '/config',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    };
+    
+    await new Promise((resolve, reject) => {
+      const req = https.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          console.log('[Electron] Backend configured:', data);
+          resolve(data);
+        });
+      });
+      req.on('error', (e) => {
+        console.error('[Electron] Failed to configure backend:', e);
+        reject(e);
+      });
+      req.write(postData);
+      req.end();
+    });
+  } catch (e) {
+    console.error('[Electron] Error configuring backend:', e);
+  }
+}
+
 async function notifyBackendStatus(active) {
   try {
     if (!fetchImpl) return;
@@ -435,8 +474,9 @@ app.whenReady().then(() => {
   // Start backend service first
   startBackendService();
   
-  // Wait a moment for backend to initialize
-  setTimeout(() => {
+  // Wait for backend to initialize, then configure it
+  setTimeout(async () => {
+    await configureBackend();  // Configure backend with correct data path
     setupWebSocketServer();
     createWindow();
   }, 2000);

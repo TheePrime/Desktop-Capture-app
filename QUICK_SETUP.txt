@@ -1,0 +1,119 @@
+DESKTOP CAPTURE APP - QUICK SETUP GUIDE
+========================================
+
+INSTALLATION (5 minutes)
+------------------------
+
+STEP 1: Install Desktop App
+   1. Double-click "Desktop Capture Setup 1.0.0.exe"
+   2. Click "Install" in the wizard
+   3. Wait for installation to complete
+   4. Click "Finish"
+
+STEP 2: Install Chrome Extension
+   1. Unzip "desktop-capture-extension.zip" to any folder
+   2. Open Chrome browser
+   3. Type in address bar: chrome://extensions
+   4. Turn ON "Developer mode" (toggle in top-right corner)
+   5. Click "Load unpacked" button
+   6. Select the unzipped "extension" folder
+   7. You should see "Desktop Capture Extension" appear
+
+STEP 3: Start Capturing
+   1. Launch "Desktop Capture" from your desktop shortcut
+   2. Click the "Start Tracking" button
+   3. Status should turn green and say "Active"
+   4. Open Chrome and go to any website (Twitter, LinkedIn, etc.)
+   5. Click on posts, images, or any content
+   6. Go back to the app's "Activities" tab to see captured data!
+
+WHERE IS MY DATA?
+-----------------
+All screenshots and click data are automatically saved to:
+
+   C:\Users\[YourUsername]\Documents\DesktopCapture\
+
+You can change this location in the app Settings.
+
+DAILY USE
+---------
+1. Open the Desktop Capture app
+2. Click "Start Tracking"
+3. Browse the web normally
+4. Check the Activities tab to review your clicks
+5. Click "Stop" when done
+
+FEATURES
+--------
+✓ Captures screenshots every 1 second (adjustable)
+✓ Saves screenshot when you click on web content
+✓ Records click location, time, and text
+✓ Works on any website
+✓ Turn extension ON/OFF with one click
+✓ Export data to CSV format
+
+TROUBLESHOOTING
+---------------
+
+Problem: Extension shows CORS error in console
+Solution: 
+   • Make sure Desktop Capture app is running
+   • Status should be green "Active"
+   • Click "Start Tracking" if it says "Inactive"
+   • Reload extension: chrome://extensions → click reload icon
+   • Refresh your browser tab
+
+Problem: No screenshots appearing
+Solution:
+   • Click "Start Tracking" in the app
+   • Wait 1-2 seconds for first screenshot
+   • Check if folder exists: Documents\DesktopCapture\[Today's Date]
+
+Problem: App won't start
+Solution:
+   • Right-click app icon → Run as Administrator
+   • Check Windows Firewall isn't blocking it
+   • Add to antivirus exclusions if needed
+
+Problem: Extension says "Could not establish connection"
+Solution:
+   • This is normal and can be ignored
+   • As long as you see "Successfully sent to backend via HTTP", it's working!
+
+SYSTEM REQUIREMENTS
+-------------------
+• Windows 10 or newer (64-bit)
+• Google Chrome browser
+• 4 GB RAM minimum (8 GB recommended)
+• 500 MB disk space + space for screenshots
+• Internet NOT required (app works offline)
+
+PRIVACY & DATA
+--------------
+✓ All data stays on YOUR computer
+✓ Nothing is uploaded to the internet
+✓ No account required
+✓ No tracking or analytics
+✓ Screenshots are stored locally only
+
+TO UNINSTALL
+------------
+1. Windows Settings → Apps
+2. Find "Desktop Capture"
+3. Click Uninstall
+4. To remove extension: chrome://extensions → Remove
+
+FOR MORE HELP
+-------------
+Check the included PORTABLE_SETUP.md file for detailed documentation,
+including advanced troubleshooting and configuration options.
+
+---
+
+Quick Check: Is it working?
+1. App status = "Active" (green) ✓
+2. Click on a website → Browser console shows "Successfully sent to backend via HTTP" ✓
+3. Activity appears in app's Activities tab ✓
+4. Files appear in Documents\DesktopCapture ✓
+
+If all 4 checks pass, you're all set! 🎉

@@ -150,8 +150,20 @@ app.add_middleware(
 )
 
 # Add Private Network Access (PNA) headers for Chrome extension
+from starlette.responses import Response
+from starlette.requests import Request
+
 @app.middleware("http")
-async def add_pna_headers(request, call_next):
+async def add_pna_headers(request: Request, call_next):
+    # Handle preflight OPTIONS requests for Private Network Access
+    if request.method == "OPTIONS":
+        response = Response(status_code=200)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+        return response
+    
     response = await call_next(request)
     # Allow requests from public websites to localhost
     response.headers["Access-Control-Allow-Private-Network"] = "true"

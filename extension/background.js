@@ -16,11 +16,37 @@ chrome.webNavigation.onCompleted.addListener((details) => {
   url: [{ pathSuffix: '.pdf' }, { urlContains: '.pdf' }]
 });
 
-// Handle messages from content scripts (optional - content scripts send directly to backend)
+// Handle messages from content scripts and forward to backend
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('[Background] Received message:', message.type);
   
-  // Just acknowledge the message
+  if (message && message.type === 'POST_CONTENT') {
+    console.log('[Background] Forwarding click data to backend');
+    
+    // Forward to backend via fetch (background scripts can access localhost)
+    fetch(`${BACKEND}/ext_event`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(message)
+    })
+    .then(response => {
+      if (response.ok) {
+        console.log('[Background] Successfully sent to backend');
+        sendResponse({ success: true, message: 'Sent to backend' });
+      } else {
+        console.error('[Background] Backend returned error:', response.status);
+        sendResponse({ success: false, error: `Backend error: ${response.status}` });
+      }
+    })
+    .catch(error => {
+      console.error('[Background] Failed to reach backend:', error);
+      sendResponse({ success: false, error: error.message });
+    });
+    
+    return true; // Keep message channel open for async response
+  }
+  
+  // Acknowledge other message types
   sendResponse({ received: true });
   return true;
 });
@@ -31,7 +57,28 @@ chrome.runtime.onConnect.addListener((port) => {
   
   port.onMessage.addListener((msg) => {
     console.log('[Background] Message from port:', msg);
-    // Content scripts handle sending to backend directly
+    
+    if (msg && msg.type === 'POST_CONTENT') {
+      // Forward to backend
+      fetch(`${BACKEND}/ext_event`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(msg)
+      })
+      .then(response => {
+        if (response.ok) {
+          console.log('[Background] Port message forwarded to backend');
+          port.postMessage({ success: true });
+        } else {
+          console.error('[Background] Backend error:', response.status);
+          port.postMessage({ success: false, error: response.status });
+        }
+      })
+      .catch(error => {
+        console.error('[Background] Failed to reach backend:', error);
+        port.postMessage({ success: false, error: error.message });
+      });
+    }
   });
   
   port.onDisconnect.addListener(() => {

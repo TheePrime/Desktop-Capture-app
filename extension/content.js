@@ -336,24 +336,24 @@ async function handleClick(ev) {
     };
     console.log('[Capture] Sending click event:', payload);
     
-    // Send directly to backend HTTP endpoint
+    // Send to background script, which will forward to backend
+    // (Content scripts cannot directly access localhost due to Private Network Access)
     try {
-      const response = await fetch('http://127.0.0.1:8000/ext_event', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload)
-      });
-      
-      if (response.ok) {
-        console.log('[Capture] Successfully sent to backend via HTTP');
+      if (canUseChromeRuntime()) {
+        chrome.runtime.sendMessage(payload, (response) => {
+          if (chrome.runtime.lastError) {
+            console.error('[Capture] Message send error:', chrome.runtime.lastError.message);
+          } else if (response && response.success) {
+            console.log('[Capture] Successfully sent to backend via background script');
+          } else {
+            console.error('[Capture] Background script failed:', response);
+          }
+        });
       } else {
-        console.error('[Capture] Backend HTTP error:', response.status);
+        console.error('[Capture] Chrome runtime not available');
       }
     } catch (err) {
-      console.error('[Capture] Failed to send to backend via HTTP:', err);
-      // Note: This is expected if backend is not running
+      console.error('[Capture] Failed to send message:', err);
     }
   
   } catch (e) {

@@ -17,27 +17,6 @@ function canUseChromeRuntime() {
   }
 }
 
-// Persistent port to reduce 'Extension context invalidated' errors
-let capturePort = null;
-function connectCapturePort() {
-  if (!canUseChromeRuntime()) return;
-  try {
-    capturePort = chrome.runtime.connect({ name: 'capture' });
-    console.log('[Capture] Connected persistent port');
-    capturePort.onDisconnect.addListener(() => {
-      console.warn('[Capture] Persistent port disconnected');
-      capturePort = null;
-      // Try to reconnect after a short delay
-      setTimeout(() => {
-        try { connectCapturePort(); } catch {}
-      }, 1000);
-    });
-  } catch (err) {
-    console.warn('[Capture] Failed to open persistent port:', err);
-  }
-}
-connectCapturePort();
-
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function expandSeeMore(root) {
@@ -357,8 +336,7 @@ async function handleClick(ev) {
     };
     console.log('[Capture] Sending click event:', payload);
     
-    // Send directly to backend HTTP endpoint (most reliable)
-    // This bypasses the extension background script entirely
+    // Send directly to backend HTTP endpoint
     try {
       const response = await fetch('http://127.0.0.1:8000/ext_event', {
         method: 'POST',
@@ -370,64 +348,12 @@ async function handleClick(ev) {
       
       if (response.ok) {
         console.log('[Capture] Successfully sent to backend via HTTP');
-        return; // Success, no need for fallbacks
       } else {
-        console.warn('[Capture] Backend HTTP request failed:', response.status);
+        console.error('[Capture] Backend HTTP error:', response.status);
       }
     } catch (err) {
-      console.warn('[Capture] Failed to send to backend via HTTP:', err);
-    }
-    
-    // Fallback: Try extension background script
-    try {
-      // Try persistent port first
-      if (capturePort && typeof capturePort.postMessage === 'function') {
-        try {
-          capturePort.postMessage(payload);
-          console.log('[Capture] Posted payload to persistent port');
-          return;
-        } catch (err) {
-          console.warn('[Capture] Failed to post to persistent port:', err);
-        }
-      } else if (canUseChromeRuntime() && typeof chrome.runtime.sendMessage === 'function') {
-        // Use one-off message to the service worker background
-        try {
-          chrome.runtime.sendMessage(payload, (resp) => {
-            if (chrome.runtime.lastError) {
-              console.warn('[Capture] sendMessage returned error:', chrome.runtime.lastError.message);
-            } else {
-              console.log('[Capture] sendMessage response:', resp);
-            }
-          });
-          return;
-        } catch (err) {
-          console.warn('[Capture] chrome.runtime.sendMessage failed:', err);
-        }
-      }
-    } catch (err) {
-      console.error('[Capture] Error with extension messaging:', err);
-    }
-    
-    // Final fallback: WebSocket (legacy)
-    try {
-      if (typeof WebSocket !== 'undefined') {
-        const electronData = {
-          ...payload,
-          timestamp: new Date().toISOString(),
-          browser_url: location.href,
-          app_name: 'chrome',
-        };
-        const ws = new WebSocket('ws://localhost:8000/ws');
-        ws.onopen = () => {
-          ws.send(JSON.stringify(electronData));
-          ws.close();
-        };
-        console.log('[Capture] Sent payload via WebSocket fallback');
-      } else {
-        console.warn('[Capture] No method available to send click payload to backend');
-      }
-    } catch (err) {
-      console.warn('[Capture] WebSocket fallback failed:', err);
+      console.error('[Capture] Failed to send to backend via HTTP:', err);
+      // Note: This is expected if backend is not running
     }
   
   } catch (e) {

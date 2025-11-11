@@ -371,15 +371,13 @@ function registerIpcHandlersOnce() {
 
     if (!result.canceled && result.filePaths.length > 0) {
       const newPath = result.filePaths[0];
-      // Save the custom path to config
-      app.setPath('userData', newPath);
       
       // Update backend config to use new path
       try {
         const response = await fetch('http://127.0.0.1:8000/config', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ output_base: path.join(newPath, 'data') })
+          body: JSON.stringify({ output_base: newPath })
         });
         
         if (!response.ok) {
@@ -395,16 +393,15 @@ function registerIpcHandlersOnce() {
   });
 
   ipcMain.handle('settings:resetDataPath', async () => {
-    // Reset to default location
-    const defaultPath = app.getPath('userData');
-    app.setPath('userData', defaultPath);
+    // Reset to default Documents location (same as backend default)
+    const defaultPath = path.join(os.homedir(), 'Documents', 'DesktopCapture');
     
     // Update backend
     try {
       await fetch('http://127.0.0.1:8000/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ output_base: path.join(defaultPath, 'data') })
+        body: JSON.stringify({ output_base: defaultPath })
       });
     } catch (err) {
       console.error('[Settings] Backend not running:', err);
@@ -415,23 +412,23 @@ function registerIpcHandlersOnce() {
 
   ipcMain.handle('settings:openDataFolder', async () => {
     const dataPath = getDataPath();
-    const dataFolder = path.join(dataPath, 'data');
     
     // Create folder if it doesn't exist
     try {
-      await fsPromises.mkdir(dataFolder, { recursive: true });
+      await fsPromises.mkdir(dataPath, { recursive: true });
     } catch (err) {
       console.error('[Settings] Failed to create data folder:', err);
     }
     
     // Open in file explorer
-    shell.openPath(dataFolder);
+    shell.openPath(dataPath);
   });
 }
 
 // Helper function to get current data path
 function getDataPath() {
-  return app.getPath('userData');
+  // Use Documents folder for easy access (same as backend)
+  return path.join(os.homedir(), 'Documents', 'DesktopCapture');
 }
 
 app.whenReady().then(() => {

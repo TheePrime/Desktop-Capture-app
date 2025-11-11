@@ -146,7 +146,16 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
+
+# Add Private Network Access (PNA) headers for Chrome extension
+@app.middleware("http")
+async def add_pna_headers(request, call_next):
+    response = await call_next(request)
+    # Allow requests from public websites to localhost
+    response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
 
 
 @app.get("/health")
